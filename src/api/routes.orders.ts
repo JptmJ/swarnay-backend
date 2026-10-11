@@ -20,7 +20,7 @@ const lineSchema = z.object({
   designSpecification: z.string().optional(),
   itemId: uuid.nullish(), pieceId: uuid.nullish(), purityId: uuid.nullish(), categoryId: uuid.nullish(),
   quantity: decimal.optional(), grossWeight: weight.optional(), stoneWeight: weight.optional(),
-  ratePerGram: money.optional().describe('Falls back to the order’s locked rate.'),
+  ratePerGram: money.optional().describe('Falls back to the order’s locked rate, then today’s sale rate in Masters → Rates for the line’s purity.'),
   makingBasis: z.enum(['per_gram', 'percent', 'flat']).optional(),
   makingRate: decimal.optional(), wastagePercent: decimal.optional(),
   stoneAmount: money.optional(), discountAmount: money.optional(), gstRate: decimal.optional(),
@@ -181,7 +181,10 @@ defineRoute({
     { status: 400, description: 'Validation failed.', schema: errorEnvelope },
     { status: 422, description: 'A business rule refused it — advance over total, back-dating off, budget inverted.', schema: errorEnvelope },
   ],
-  changelog: seed,
+  changelog: [
+    ...seed,
+    { date: '2026-10-10', kind: 'changed', note: 'A line with a purity and no rate is priced at today’s sale rate from Masters → Rates instead of 0.' },
+  ],
   handler: async (req, res) => {
     const order = await transaction((tx) => createOrder(tx, req.body));
     res.status(201).json(order);

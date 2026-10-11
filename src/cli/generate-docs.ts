@@ -19,6 +19,7 @@ MODULE_NAMES.set('inventory', 'Stock');
 MODULE_NAMES.set('purchase', 'Purchase');
 MODULE_NAMES.set('sales', 'Sales / POS');
 MODULE_NAMES.set('tenancy', 'Tenancy');
+MODULE_NAMES.set('security', 'Security vault & private entry');
 
 /** Columns the framework adds to every table — listed once, not per table. */
 const FRAMEWORK = new Set(['id', 'tenant_id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at']);

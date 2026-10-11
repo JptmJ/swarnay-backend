@@ -85,7 +85,14 @@ export function diffSchema(live: LiveSchema, desired = tablesInDependencyOrder()
     });
   }
 
-  return changes;
+  // Foreign keys go last, once every table and column exists. Tables in a
+  // cycle (item ↔ item_category) are created in some order, and a key added
+  // straight after its own table could name a parent that does not exist yet —
+  // which, while another schema sat on the search_path, silently bound the key
+  // to that schema's copy of the parent instead of failing.
+  const isForeignKey = (c: SchemaChange): boolean =>
+    c.kind === 'add_constraint' && c.sql.some((s) => /\bforeign key\b/i.test(s));
+  return [...changes.filter((c) => !isForeignKey(c)), ...changes.filter(isForeignKey)];
 }
 
 function diffColumns(table: ResolvedTable, current: LiveSchema extends Map<string, infer T> ? T : never, changes: SchemaChange[]): void {
@@ -217,10 +224,15 @@ function diffDroppedColumns(
 /**
  * The table and column a live foreign key actually points at, read back out of
  * `pg_get_constraintdef`, e.g. `FOREIGN KEY (x) REFERENCES app_user(id) ON ...`.
+ * Postgres names the schema only when the table is not the one the search_path
+ * finds — introspection runs with the app's schema first, so a prefix such as
+ * `REFERENCES app.item_category(id)` always means "some other copy", and it is
+ * kept so the comparison below fails.
  */
 function liveFkTarget(definition: string): string | null {
-  const match = /references\s+"?([a-z_][a-z0-9_]*)"?\s*\(\s*"?([a-z_][a-z0-9_]*)"?\s*\)/i.exec(definition);
-  return match ? `${match[1]}.${match[2]}` : null;
+  const match = /references\s+(?:"?([a-z_][a-z0-9_]*)"?\.)?"?([a-z_][a-z0-9_]*)"?\s*\(\s*"?([a-z_][a-z0-9_]*)"?\s*\)/i.exec(definition);
+  if (!match) return null;
+  return `${match[1] ? `${match[1]}.` : ''}${match[2]}.${match[3]}`;
 }
 
 /**
@@ -228,7 +240,9 @@ function liveFkTarget(definition: string): string | null {
  *
  * Only the target is compared. `on delete` / `on update` wording varies between
  * how Postgres prints a constraint and how we write it, and getting that wrong
- * would mean rebuilding the same key on every sync.
+ * would mean rebuilding the same key on every sync. A key into another schema's
+ * copy of the right table (left over from when `app` was on the search_path)
+ * does not match: every insert was being checked against the wrong rows.
  */
 function fkMatches(definition: string, def: ColumnDef): boolean {
   const wanted = `${def.references!.table}.${def.references!.column ?? 'id'}`;

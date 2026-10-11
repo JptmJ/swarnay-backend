@@ -2,7 +2,8 @@ import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
 
 import pg from 'pg';
-import { env } from '../config/env.js';
+import { dbTarget, env, isProtectedDatabase } from '../config/env.js';
+import { APP_SCHEMA } from './search-path.js';
 import { logger } from '../util/logger.js';
 
 const { Pool, types } = pg;
@@ -65,7 +66,10 @@ export function databaseTarget(): { host: string; port: string; database: string
 export async function checkConnection(): Promise<void> {
   const target = databaseTarget();
   const started = Date.now();
-  logger.info({ ...target, ssl: env.DATABASE_SSL, schema: env.DATABASE_SCHEMA }, 'Connecting to Postgres…');
+  logger.info(
+    { dbTarget: dbTarget ?? 'DATABASE_URL', ...target, ssl: env.DATABASE_SSL, schema: APP_SCHEMA },
+    'Connecting to Postgres…',
+  );
 
   let client: pg.PoolClient;
   try {
@@ -76,8 +80,11 @@ export async function checkConnection(): Promise<void> {
   }
 
   try {
-    const { rows } = await client.query<{ version: string; db: string; usr: string; addr: string | null }>(
-      `select version() as version, current_database() as db, current_user as usr, inet_server_addr()::text as addr`,
+    const { rows } = await client.query<{
+      version: string; db: string; usr: string; addr: string | null; bypasses_rls: boolean;
+    }>(
+      `select version() as version, current_database() as db, current_user as usr, inet_server_addr()::text as addr,
+              (select rolsuper or rolbypassrls from pg_roles where rolname = current_user) as bypasses_rls`,
     );
     const row = rows[0]!;
     logger.info(
@@ -87,12 +94,24 @@ export async function checkConnection(): Promise<void> {
         port: target.port,
         database: row.db,
         user: row.usr,
-        schema: env.DATABASE_SCHEMA,
+        schema: APP_SCHEMA,
         version: row.version.split(',')[0],
         latencyMs: Date.now() - started,
       },
       `Database connected ✔ ${row.db} on ${target.host}:${target.port}`,
     );
+    if (row.bypasses_rls) {
+      logger.warn(
+        { user: row.usr },
+        `Connected as "${row.usr}", a role that bypasses Row Level Security — tenant isolation is NOT enforced by the database. Connect as a role with rolbypassrls = false (see CLAUDE.md → Security).`,
+      );
+    }
+    if (isProtectedDatabase) {
+      logger.warn(
+        `DB_TARGET=deployed — this is the LIVE shops' database. Everything you do in the app is real. ` +
+          `Schema sync is verify-only; table changes need npm run db:migrate -- --confirm=${row.db}`,
+      );
+    }
   } finally {
     client.release();
   }

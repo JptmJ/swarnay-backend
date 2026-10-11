@@ -127,6 +127,7 @@ export async function createOrder(tx: Tx, input: CreateOrderInput) {
   const lines = input.lines ?? [];
 
   const purities = await loadPurities(tx, lines.map((l) => l.purityId));
+  const todays = await masterRates(tx, lines.filter((l) => !l.ratePerGram).map((l) => l.purityId), input.branchId);
   const priced = lines.map((line) =>
     priceLine(
       {
@@ -134,7 +135,7 @@ export async function createOrder(tx: Tx, input: CreateOrderInput) {
         grossWeight: line.grossWeight ?? '0',
         stoneWeight: line.stoneWeight,
         purityPercent: line.purityId ? purities.get(line.purityId) : '100',
-        ratePerGram: line.ratePerGram ?? input.lockedRatePerGram ?? '0',
+        ratePerGram: line.ratePerGram ?? input.lockedRatePerGram ?? (line.purityId ? todays.get(line.purityId) : undefined) ?? '0',
         makingBasis: line.makingBasis,
         makingRate: line.makingRate,
         wastagePercent: line.wastagePercent,
@@ -257,6 +258,26 @@ export async function createOrder(tx: Tx, input: CreateOrderInput) {
   }
 
   return order;
+}
+
+/**
+ * Today's sale rate per purity from Masters → Rates (a branch rate beats the
+ * shared one), for lines that arrive without a rate of their own.
+ */
+export async function masterRates(
+  tx: Tx, purityIds: Array<string | null | undefined>, branchId: string | null,
+): Promise<Map<string, Decimal>> {
+  const wanted = [...new Set(purityIds.filter((i): i is string => Boolean(i)))];
+  if (!wanted.length) return new Map();
+  const rows = await tx.query<{ purity_id: string; rate: Decimal }>(
+    `select distinct on (purity_id) purity_id, rate_per_gram::text as rate
+       from metal_rate
+      where purity_id = any($1::uuid[]) and effective_from <= now() and retired_at is null
+        and (branch_id = $2 or branch_id is null)
+      order by purity_id, effective_from desc, branch_id nulls last`,
+    [wanted, branchId],
+  );
+  return new Map(rows.map((r) => [r.purity_id, r.rate]));
 }
 
 async function loadPurities(tx: Tx, ids: Array<string | null | undefined>): Promise<Map<string, Decimal>> {

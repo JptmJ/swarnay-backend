@@ -94,6 +94,10 @@ npm run typecheck && npm test && npm run db:migrate -- --dry-run
 The dry run must end with **"The database already matches"** — if it shows
 pending changes, run `npm run db:migrate` and check the result.
 
+Run all three against a development database (`DB_TARGET=local` or `supabase`),
+never `DB_TARGET=deployed`. `npm test` needs a `.env.test` pointing at a
+database used only by the tests, and refuses to start without one.
+
 ---
 
 ## Database rules
@@ -101,6 +105,20 @@ pending changes, run `npm run db:migrate` and check the result.
 **Tables are declared in `*.schema.ts`, never in SQL files.** Add the table,
 add one import line to `src/bootstrap.ts`, restart. The schema engine does the
 rest.
+
+**One schema: `swarnay_schema`.** Every table lives there, on every database
+(laptop, Supabase, deployed). The name is fixed in `core/db/search-path.ts` —
+never make it configurable, never add another schema to the search_path, and
+never schema-qualify a table to reach another copy. Two developers once ran
+with different schemas (`public`, `app`) against the same database: every
+table existed twice, rows were split between the copies, and some foreign keys
+pointed across them. `npm run db:migrate -- --force` removes any other copy —
+see `docs/ENVIRONMENTS.md`.
+
+**`npm run db:migrate` is the only way to change a database's structure.** It
+makes the database match the code; `--force` also applies what deletes data.
+Never fix structure by hand in the SQL editor — the next migrate would see
+drift or undo it.
 
 - **Defaults are raw SQL.** `default: "'draft'"` — a string literal needs its
   own quotes. `default: 'draft'` is read as a column reference. There is a
@@ -148,11 +166,32 @@ jewellery shop that is a real rupee somebody has to explain.
 
 ---
 
+## Environments
+
+- **A laptop picks its database with `DB_TARGET`** (`local` · `supabase` ·
+  `deployed`) and one `DATABASE_URL_<TARGET>` per database in `.env`. Servers
+  set `DATABASE_URL` directly. Details: `docs/ENVIRONMENTS.md`.
+- **`DB_TARGET=deployed` is the live shops' data.** Sync is verify-only there,
+  and anything that changes tables or rewrites data in bulk calls
+  `assertMayChange()` (`core/db/protected.ts`), so it needs
+  `--confirm=<database>` on the command line. A new CLI that writes in bulk
+  calls it first; one that seeds demo data refuses the deployed target outright.
+- **The frontends switch backend with `npm run dev` / `npm run dev:deployed`**,
+  driven by their committed `.env.<mode>` files. Never edit a committed env
+  file to switch.
+- **Credentials never go in a committed file.** `.env.example` holds
+  placeholders only. The production database password was once committed there;
+  it sits in public git history and had to be rotated.
+
+---
+
 ## Security
 
-- **The app must never connect as a Postgres superuser.** Supabase's `postgres`
-  role has `rolbypassrls = true`, which silently voids every isolation policy.
-  The app connects as `ratnagrid_app` (`rolbypassrls = false`).
+- **The app must never connect as a role that bypasses Row Level Security** —
+  a superuser, or any role with `rolbypassrls = true`, silently voids every
+  isolation policy. Supabase's `postgres` role is one; there the app connects
+  as `ratnagrid_app` (`rolbypassrls = false`). The startup log warns when the
+  connected role bypasses RLS.
 - **Never write a query that filters by `tenant_id` by hand.** RLS does it.
   Adding it manually suggests you are working around the context, which is a
   sign something is wrong.
@@ -182,7 +221,8 @@ waiting. *"Not enough stock. Available: 80g — tried to remove 200g."* — not
 
 ```bash
 npm run dev          # sync schema, then serve on :4000
-npm run db:migrate   # make the tables match the code (-- --dry-run to only look)
+npm run db:migrate   # make the database match the code (-- --dry-run to look, -- --force to also delete)
+DB_TARGET=deployed npm run dev   # local backend on the live data (protected)
 npm run db:seed      # demo tenants (--fresh wipes first)
 npm run gen:client   # regenerate the frontend client
 npm test             # unit tests

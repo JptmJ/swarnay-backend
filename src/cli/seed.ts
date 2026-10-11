@@ -18,7 +18,7 @@ import '../bootstrap.js';
 import { closePool, checkConnection, pool } from '../core/db/pool.js';
 import { asPlatform, asTenant } from '../core/db/client.js';
 import { syncSchema } from '../core/db/schema/sync.js';
-import { isProduction } from '../core/config/env.js';
+import { isProduction, isProtectedDatabase } from '../core/config/env.js';
 import { createBranch, createTenant, createTenantUser } from '../modules/platform/provisioning.service.js';
 import { createOrder } from '../modules/orders/orders.service.js';
 import { checkout } from '../modules/sales/sales.service.js';
@@ -395,8 +395,8 @@ async function wipeDemoTenants(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  if (isProduction) {
-    console.error('\nRefusing to seed demo data while NODE_ENV=production.\n');
+  if (isProduction || isProtectedDatabase) {
+    console.error(`\nRefusing to seed demo data ${isProduction ? 'while NODE_ENV=production' : 'into the deployed database (DB_TARGET=deployed)'}.\n`);
     process.exitCode = 1;
     return;
   }

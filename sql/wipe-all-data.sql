@@ -1,7 +1,7 @@
 -- =====================================================================
 -- Swarnay / Swarnay - wipe ALL data from ALL tables
 --
--- Schema : app            (DATABASE_SCHEMA=app in karatsetu-backend/.env)
+-- Schema : swarnay_schema (the only schema the app uses; see CLAUDE.md)
 -- Target : Supabase Postgres
 -- Effect : deletes every row in all 86 application tables.
 --          The schema itself (tables, columns, indexes, FKs, RLS policies)
@@ -14,7 +14,7 @@
 --   Every tenant-scoped table has RLS "enable" AND "force", so a plain
 --   DELETE only sees the rows of the tenant set on the connection - that
 --   applies to the table owner too. TRUNCATE is not subject to RLS at all,
---   so it clears everything in one pass. Run as the owner of the app schema
+--   so it clears everything in one pass. Run as the owner of the application tables
 --   (the postgres role in the Supabase editor, or ratnagrid_app).
 --
 -- All primary keys are uuid, so there are no sequences to reset.
@@ -23,7 +23,7 @@
 
 begin;
 
-set local search_path to app, public, extensions;
+set local search_path to swarnay_schema, extensions;
 
 -- One statement for all 86 tables, so foreign-key order does not matter and
 -- CASCADE can only reach tables already in the list.
@@ -121,5 +121,5 @@ commit;
 -- Verification: every row count below should be 0.
 select relname as table_name, n_live_tup as approx_rows
 from pg_stat_user_tables
-where schemaname = 'app'
+where schemaname = 'swarnay_schema'
 order by n_live_tup desc, relname;

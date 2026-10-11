@@ -235,9 +235,16 @@ export const metalRateTable = defineTable({
     buying_rate_per_gram: col.money({ comment: 'What the shop pays for old gold — normally lower.' }),
     source: col.enum(['manual', 'feed'], { notNull: true, default: "'manual'" }),
     branch_id: col.fk('branch', { comment: 'Null means the rate applies to every branch.' }),
+    /**
+     * Set when the shop removes this metal + purity from its rate list. The
+     * rate itself is never changed — retired rows stay for history, but no
+     * price is taken from them. Adding the purity again starts a fresh row.
+     */
+    retired_at: col.timestamptz({ comment: 'Removed from the rate list. Kept for history; never used for pricing.' }),
   },
   indexes: [
     { columns: ['metal_id', 'purity_id', 'effective_from'] },
+    { columns: ['purity_id', 'effective_from'], where: 'retired_at is null' },
   ],
   checks: [{ name: 'rate_positive', expression: 'rate_per_gram > 0' }],
 });
