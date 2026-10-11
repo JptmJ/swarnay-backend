@@ -9,6 +9,7 @@ import '../bootstrap.js';
 import type { Tx } from '../core/db/client.js';
 import { asPlatform, asTenant } from '../core/db/client.js';
 import { closePool } from '../core/db/pool.js';
+import { assertMayChange } from '../core/db/protected.js';
 import { createMasterDefaults } from '../modules/tenancy/provisioning.service.js';
 
 async function shareNumbering(tx: Tx): Promise<number> {
@@ -44,6 +45,7 @@ async function shareNumbering(tx: Tx): Promise<number> {
 }
 
 async function main(): Promise<void> {
+  assertMayChange('backfill master data on every tenant');
   const tenants = await asPlatform((tx) => tx.query<{ id: string; code: string }>(
     `select id, code from tenant where deleted_at is null order by created_at`,
   ));

@@ -17,7 +17,7 @@
 
 begin;
 
-set local search_path to app, public, extensions;
+set local search_path to swarnay_schema, extensions;
 
 truncate table
   account,
@@ -110,4 +110,4 @@ truncate table
 commit;
 
 -- The one row that should survive.
-select email, role, is_active from app.platform_user;
+select email, role, is_active from swarnay_schema.platform_user;

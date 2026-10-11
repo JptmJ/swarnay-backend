@@ -258,13 +258,26 @@ export async function refreshSession(refreshToken: string, meta: ClientMeta = {}
   return outcome;
 }
 
-/** Signing out ends this sign-in on every tab that shares it. */
+/**
+ * Signing out ends this sign-in on every tab that shares it, and closes any
+ * vault unlock or private entry the person had open.
+ */
 export async function revokeRefreshToken(refreshToken: string): Promise<void> {
-  await asPlatform((tx) => tx.query(
-    `update refresh_token set revoked_at = now()
-      where family_id = (select family_id from refresh_token where token_hash = $1) and revoked_at is null`,
-    [hashToken(refreshToken)],
-  ));
+  await asPlatform(async (tx) => {
+    const ended = await tx.query<{ user_id: string }>(
+      `update refresh_token set revoked_at = now()
+        where family_id = (select family_id from refresh_token where token_hash = $1) and revoked_at is null
+       returning user_id`,
+      [hashToken(refreshToken)],
+    );
+    if (ended.length) {
+      await tx.query(
+        `update security_grant set revoked_at = now(), updated_at = now()
+          where user_id = $1 and revoked_at is null and expires_at > now()`,
+        [ended[0]!.user_id],
+      );
+    }
+  });
 }
 
 /**

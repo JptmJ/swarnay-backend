@@ -2,7 +2,7 @@
   "info": {
     "name": "Swarnay API",
     "_postman_id": "swarnay-api-collection",
-    "description": "# Swarnay API\n\nGenerated from the running server on 2026-10-04.\n218 endpoints.\n\n## Start here\n\n1. Set `baseUrl` — it defaults to the deployed backend.\n2. **Super admin work:** run `Platform Operator → POST platform/auth/login`.\n   The token is saved automatically into `platformToken`.\n3. **Shop staff work:** run `Settings → POST auth/login` with a `tenantCode`.\n   That token is saved into `token`, and the branch into `branchId`.\n\nEvery other request picks the right token up by itself.\n\n## Why two logins\n\nA super admin has no tenant, so they sign in with just email and password.\nShop staff belong to one business, so they also send `tenantCode` — that is\nwhat tells the server which shop `rajesh@gmail.com` works at.\n\n## Variables\n\n- `baseUrl` — the server\n- `platformToken` / `token` — filled in by the two logins\n- `tenantId`, `branchId`, `id` — fill these in as you go\n- `today`, `nowIso` — set automatically before each request",
+    "description": "# Swarnay API\n\nGenerated from the running server on 2026-10-09.\n226 endpoints.\n\n## Start here\n\n1. Set `baseUrl` — it defaults to the deployed backend.\n2. **Super admin work:** run `Platform Operator → POST platform/auth/login`.\n   The token is saved automatically into `platformToken`.\n3. **Shop staff work:** run `Settings → POST auth/login` with a `tenantCode`.\n   That token is saved into `token`, and the branch into `branchId`.\n\nEvery other request picks the right token up by itself.\n\n## Why two logins\n\nA super admin has no tenant, so they sign in with just email and password.\nShop staff belong to one business, so they also send `tenantCode` — that is\nwhat tells the server which shop `rajesh@gmail.com` works at.\n\n## Variables\n\n- `baseUrl` — the server\n- `platformToken` / `token` — filled in by the two logins\n- `tenantId`, `branchId`, `id` — fill these in as you go\n- `today`, `nowIso` — set automatically before each request",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -588,7 +588,7 @@
             "description": "One call sets up everything a business needs to start: the tenant, its chart of accounts, purities, numbering series, the five roles, the head user (Admin) and the first branch with its stock locations. A half-created tenant is worse than none, so this does the lot.\n\n**Permission:** `platform.tenants.create`\n**Auth:** super admin token\n\n**Responses**\n- `201` — Tenant ready to use.\n- `400` — Invalid code or a password under 8 characters.\n- `409` — That tenant code is taken.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"CODE01\",\n  \"legalName\": \"Example name\",\n  \"displayName\": \"Example name\",\n  \"kind\": \"retailer\",\n  \"gstin\": \"27AABCU9603R1ZM\",\n  \"pan\": \"AABCU9603R\",\n  \"stateCode\": \"CODE01\",\n  \"maxBranches\": \"text\",\n  \"admin\": {\n    \"email\": \"someone@example.com\",\n    \"fullName\": \"Example name\",\n    \"password\": \"changeme123\",\n    \"phone\": \"9820011223\"\n  },\n  \"branch\": {\n    \"code\": \"CODE01\",\n    \"name\": \"Example name\",\n    \"kind\": \"showroom\",\n    \"city\": \"text\",\n    \"state\": \"text\",\n    \"stateCode\": \"CODE01\"\n  },\n  \"modules\": [\n    {\n      \"key\": \"text\",\n      \"licence\": \"included\",\n      \"trialDays\": 30\n    }\n  ]\n}",
+              "raw": "{\n  \"code\": \"CODE01\",\n  \"legalName\": \"Example name\",\n  \"displayName\": \"Example name\",\n  \"kind\": \"retailer\",\n  \"gstin\": \"27AABCU9603R1ZM\",\n  \"pan\": \"AABCU9603R\",\n  \"stateCode\": \"CODE01\",\n  \"maxBranches\": \"text\",\n  \"admin\": {\n    \"email\": \"someone@example.com\",\n    \"fullName\": \"Example name\",\n    \"password\": \"changeme123\",\n    \"phone\": \"9820011223\"\n  },\n  \"branch\": {\n    \"code\": \"CODE01\",\n    \"name\": \"Example name\",\n    \"kind\": \"showroom\",\n    \"city\": \"text\",\n    \"state\": \"text\",\n    \"stateCode\": \"CODE01\"\n  },\n  \"modules\": [\n    {\n      \"key\": \"text\",\n      \"licence\": \"included\",\n      \"trialDays\": 30,\n      \"enabled\": false\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -735,7 +735,7 @@
               ],
               "query": []
             },
-            "description": "Grant, revoke, or move a module between included / purchased / trial. A module whose trial or term has lapsed still appears in the tenant’s dock, but locked — so they can see what they are missing rather than having it silently vanish.\n\n**Permission:** `platform.entitlement.update`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Entitlement updated.\n- `403` — Not a super admin.",
+            "description": "Grant, revoke, or move a module between included / purchased / trial. A module whose trial or term has lapsed still appears in the tenant’s dock, but locked — so they can see what they are missing rather than having it silently vanish.\n\n`enabled: false` switches the module off: it leaves the tenant’s dock and every endpoint belonging to it answers 403 `module_disabled`, for staff and support sessions alike. `disabledSubmodules` does the same for single sub-modules that have permissions of their own (e.g. `pos.purchase`) — see `enforced` on `GET /api/platform/modules`. Other sub-module keys are accepted but nothing checks them yet. Data is never touched, so switching back on restores everything as it was.\n\nMaster Data, Settings and SaaS Admin are `required` in the catalog and cannot be switched off.\n\n**Permission:** `platform.entitlement.update`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Entitlement updated.\n- `400` — A sub-module key that does not belong to this module.\n- `403` — Not a super admin.\n- `404` — No such tenant, or no such module.\n- `422` — `module_required` — this module cannot be switched off.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"enabled\": false,\n  \"licence\": \"included\",\n  \"trialEndsAt\": \"text\",\n  \"expiresAt\": \"text\",\n  \"disabledSubmodules\": [\n    \"text\"\n  ]\n}",
@@ -879,6 +879,161 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Example name\",\n  \"description\": \"text\",\n  \"permissions\": [\n    \"text\"\n  ],\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET platform/tenants/:id/security",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/security",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "security"
+              ],
+              "query": []
+            },
+            "description": "The passcode itself is never returned — only whether one is set. Includes how many vault unlocks are open right now and who is locked out.\n\n**Permission:** `platform.tenants.view`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Settings.\n- `404` — No such tenant."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT platform/tenants/:id/security/gateway",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/security/gateway",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "security",
+                "gateway"
+              ],
+              "query": []
+            },
+            "description": "Points are normalised over the 404 artwork (x 0.07–0.93, y 0.10–0.90) and at least 96 artwork units apart. Switching it on needs a valid path and three points. Every save ends any open private-entry grant.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Saved.\n- `400` — Path or points not usable.\n- `409` — `conflict` — changed by someone else since it was loaded.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false,\n  \"path\": \"text\",\n  \"points\": [\n    {\n      \"x\": 1,\n      \"y\": 1\n    }\n  ],\n  \"revision\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST platform/tenants/:id/security/lockouts/clear",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/security/lockouts/clear",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "security",
+                "lockouts",
+                "clear"
+              ],
+              "query": []
+            },
+            "description": "Omit `userId` to clear everyone in this business.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `200` — How many were cleared.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PUT platform/tenants/:id/security/vault",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/security/vault",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "security",
+                "vault"
+              ],
+              "query": []
+            },
+            "description": "Send the whole setting with the `revision` you loaded; a stale revision gets 409. Leave `passcode` out to keep the current one. Every save locks the vault for everyone who had it open, and a new passcode clears old wrong-try lockouts.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Saved.\n- `400` — Passcode under 6 characters, or no role chosen.\n- `409` — `conflict` — changed by someone else since it was loaded.\n- `422` — `vault_passcode_required` — switched on with no passcode set.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false,\n  \"passcode\": \"CODE01\",\n  \"unlockMinutes\": 1,\n  \"allowedRoleTypes\": [\n    \"owner\"\n  ],\n  \"revision\": 1\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1038,6 +1193,172 @@
       "name": "Settings & Theme Studio",
       "description": "CSS theme variables, luxury presets, approval workflows & branch parameters.",
       "item": [
+        {
+          "name": "GET security/vault",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/security/vault",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "security",
+                "vault"
+              ],
+              "query": []
+            },
+            "description": "Whether the vault is on for this business and whether the signed-in person may unlock it. No secret is returned. When `canUnlock` is false, show `message` instead of the passcode box.\n\n**Permission:** `settings.vault.unlock`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Vault status."
+          },
+          "response": []
+        },
+        {
+          "name": "POST security/vault/lock",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/security/vault/lock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "security",
+                "vault",
+                "lock"
+              ],
+              "query": []
+            },
+            "description": "Lock private figures now\n\n**Permission:** `settings.vault.unlock`\n**Auth:** shop staff token\n\n**Responses**\n- `204` — Locked.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"text\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST security/vault/session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/security/vault/session",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "security",
+                "vault",
+                "session"
+              ],
+              "query": []
+            },
+            "description": "Send the token from unlock. Returns its expiry, or `null` once it has expired or been ended for any reason — then lock the screen.\n\n**Permission:** `settings.vault.unlock`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Still unlocked, or null.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"text\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST security/vault/unlock",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/security/vault/unlock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "security",
+                "vault",
+                "unlock"
+              ],
+              "query": []
+            },
+            "description": "Checks the passcode against the hash the super admin set. Five wrong tries lock that person out for 15 minutes. The token is valid for the configured minutes, and stops working early if the vault is switched off or re-configured, or the person’s password or role changes.\n\n**Permission:** `settings.vault.unlock`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Unlocked.\n- `403` — `vault_not_allowed` — this person’s role may not unlock.\n- `422` — `vault_passcode_invalid` (wrong passcode, message says tries left) or `vault_disabled`.\n- `429` — `vault_locked` — too many wrong passcodes; or `rate_limited` from one network.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passcode\": \"CODE01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
         {
           "name": "GET settings/config",
           "request": {
@@ -4219,7 +4540,7 @@
               ],
               "query": []
             },
-            "description": "A new rate is a new row — rates are never edited. Yesterday’s invoices keep pointing at yesterday’s rate, so an old bill can always be explained.\n\n**Permission:** `master.rates.create`\n**Auth:** shop staff token\n\n**Responses**\n- `201` — Rate broadcast.\n- `400` — Buying rate above selling rate, or the purity belongs to another metal.\n- `422` — Rate must be greater than zero.",
+            "description": "A new rate is a new row — rates are never edited. Yesterday’s invoices keep pointing at yesterday’s rate, so an old bill can always be explained. Setting a rate for a purity that was removed puts it back on the list. Every screen that picks a metal and purity — billing, orders, old gold, purchase, schemes — uses the latest rate set here.\n\n**Permission:** `master.rates.create`\n**Auth:** shop staff token\n\n**Responses**\n- `201` — Rate broadcast.\n- `400` — Buying rate above selling rate, or the purity belongs to another metal.\n- `422` — Rate must be greater than zero, or the metal / purity is switched off.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"metal_id\": \"{{metal_id}}\",\n  \"purity_id\": \"{{purity_id}}\",\n  \"rate_per_gram\": \"6500.00\",\n  \"buying_rate_per_gram\": \"6500.00\",\n  \"branch_id\": \"{{branch_id}}\",\n  \"effective_from\": \"{{nowIso}}\"\n}",
@@ -4229,6 +4550,38 @@
                 }
               }
             }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE master/rates/:purityId",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/master/rates/{{purityId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "master",
+                "rates",
+                "{{purityId}}"
+              ],
+              "query": []
+            },
+            "description": "Nothing is deleted: its rates stay in history and on every bill that used them, but no new price is taken from them, so billing that purity is refused with `rate_missing` until a rate is set again. Applies to every branch.\n\n**Permission:** `master.rates.delete`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Removed.\n- `404` — That purity has no rate on the list."
           },
           "response": []
         },
@@ -4264,10 +4617,16 @@
                   "value": "{{branchId}}",
                   "disabled": true,
                   "description": ""
+                },
+                {
+                  "key": "configured",
+                  "value": "true",
+                  "disabled": true,
+                  "description": "true = only purities that have a rate."
                 }
               ]
             },
-            "description": "One row per active purity, with its latest rate (a branch rate beats the shared one) and the last rate before today, for the day’s change. A purity with no rate yet has null rate fields — POS refuses to bill it with `rate_missing`.\n\n**Permission:** `master.rates.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Current rates."
+            "description": "One row per active purity, with its latest rate (a branch rate beats the shared one) and the last rate before today, for the day’s change. A purity with no rate yet has null rate fields — POS refuses to bill it with `rate_missing`.\n\nSend `configured=true` for the Rates screen: only the metal + purity pairs the shop has set a rate for. `is_today` is false for a rate last set before today (shop time zone), so the screen can ask for today’s rate.\n\n**Permission:** `master.rates.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Current rates."
           },
           "response": []
         },
@@ -4312,7 +4671,7 @@
                 }
               ]
             },
-            "description": "Rate history for a purity\n\n**Permission:** `master.rates.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Rates, newest first."
+            "description": "Every rate set in the window, newest first, including removed ones (`retired_at` set) and who set each.\n\n**Permission:** `master.rates.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Rates, newest first."
           },
           "response": []
         }
@@ -4714,6 +5073,50 @@
               ]
             },
             "description": "Active orders grouped into their stage columns, ready to render.\n\n**Permission:** `orders.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Board with orders per stage."
+          },
+          "response": []
+        },
+        {
+          "name": "POST orders/import",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "import"
+              ],
+              "query": []
+            },
+            "description": "Up to 1,000 rows a call; send a big file as several calls, passing `firstRow` so problems name the spreadsheet row. One row = one order with one line, at the branch in `X-Branch-Id`.\n\n**Customer**: matched on `customer_code`, else `customer_phone`. A phone nobody has yet becomes a new customer when `customer_name` is given.\n**Price**: `rate_per_gram`, else today’s sale rate in Masters → Rates for the purity. A purity with weight and no rate anywhere is refused (repairs excepted).\n**Stage**: a stage key of that order type’s pipeline (default: its first). A terminal stage imports the order as completed.\n**reference**: the old order number; a reference already imported is skipped, not duplicated.\n\nPast order dates are allowed here even when back-dating is switched off, since bringing old orders across is the point.\n\n**Permission:** `orders.import`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — What happened to each row.\n- `403` — Missing `orders.import`.\n- `422` — `business_rule` — no branch selected.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rows\": [\n    {}\n  ],\n  \"firstRow\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         },
@@ -9562,100 +9965,6 @@
               "query": []
             },
             "description": "Rupees on Sundry Creditors, fine metal per metal (with its average carrying rate), and unbilled inwards.\n\n**Permission:** `pos.purchase.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — The balance."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "core",
-      "description": "",
-      "item": [
-        {
-          "name": "POST private-screen/password",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Branch-Id",
-                "value": "{{branchId}}",
-                "description": "Optional — act at one branch."
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/private-screen/password",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "private-screen",
-                "password"
-              ],
-              "query": []
-            },
-            "description": "Change the private screen password\n\n**Permission:** `settings.config.update`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Changed.\n- `422` — Current password wrong.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"currentPassword\": \"changeme123\",\n  \"newPassword\": \"changeme123\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST private-screen/unlock",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Branch-Id",
-                "value": "{{branchId}}",
-                "description": "Optional — act at one branch."
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/private-screen/unlock",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "private-screen",
-                "unlock"
-              ],
-              "query": []
-            },
-            "description": "Checks the private screen password. Five wrong tries lock the user out for five minutes.\n\n**Permission:** none\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Right password.\n- `422` — Wrong password, or locked out.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"password\": \"changeme123\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
           },
           "response": []
         }

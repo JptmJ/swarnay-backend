@@ -310,13 +310,6 @@ export const CONFIG = {
     default: ['date', 'voucher', 'customer', 'phone', 'address', 'id_proof', 'description', 'gross', 'net', 'purity', 'test', 'fine', 'value', 'settlement'],
     scope: 'tenant',
   }),
-  privateScreenPassword: defineConfig({
-    key: 'security.private_screen_password', group: 'security', label: 'Private screen password',
-    description: 'scrypt hash (salt:hash) of the password that opens the private screen. Seeded as Ratna@2026; changed through POST /api/private-screen/password.',
-    schema: z.string().regex(/^[0-9a-f]{32}:[0-9a-f]{128}$/),
-    default: '80e6f4873cd7f42cc7f7e9cca4aa9bde:4a156cbd3dfb4488e1c7c8f87480982d9b3033762e413df6ef2ffec93504271854e5a991d153182b5cef2f4f909057f7291fe88ec4b60981eb3fad2b63c972e8',
-    scope: 'tenant', secret: true,
-  }),
 
   negativeStock: defineConfig({
     key: 'inventory.allow_negative_stock',

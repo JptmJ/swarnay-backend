@@ -65,6 +65,14 @@ export interface RouteSpec {
   handler: (req: Request, res: Response) => Promise<unknown>;
   /** Marks an endpoint that still works but should not be used in new code. */
   deprecated?: { since: string; useInstead?: string; note?: string };
+  /**
+   * Live and authorised like any other route, but left out of /dev-docs, the
+   * generated client, Postman and the permission tree. For endpoints whose
+   * very name should not be advertised. Concealment is never the only guard.
+   */
+  hidden?: boolean;
+  /** Sends `Cache-Control: private, no-store` on every response, errors included. */
+  noStore?: boolean;
 }
 
 const routes: RouteSpec[] = [];
@@ -84,11 +92,15 @@ export function defineRoute(spec: RouteSpec): RouteSpec {
 export const routeScope = (route: RouteSpec): 'tenant' | 'platform' =>
   route.scope ?? (route.path.startsWith('/api/platform') ? 'platform' : 'tenant');
 
-export const allRoutes = (): RouteSpec[] => [...routes];
+/** Every documented route. Hidden routes are left out, so nothing generated from this lists them. */
+export const allRoutes = (): RouteSpec[] => routes.filter((r) => !r.hidden);
+
+/** Every route the server answers, hidden ones included. For audits, never for docs. */
+export const liveRoutes = (): RouteSpec[] => [...routes];
 
 export const routesByModule = (): Map<string, RouteSpec[]> => {
   const grouped = new Map<string, RouteSpec[]>();
-  for (const route of routes) {
+  for (const route of allRoutes()) {
     const list = grouped.get(route.module) ?? [];
     list.push(route);
     grouped.set(route.module, list);
@@ -104,7 +116,7 @@ export const routesByModule = (): Map<string, RouteSpec[]> => {
  * "Recently updated" panel at the top of /dev-docs reads.
  */
 export function changeFeed(limit = 60): Array<RouteChange & { method: HttpMethod; path: string; module: string }> {
-  return routes
+  return allRoutes()
     .flatMap((route) =>
       (route.changelog ?? []).map((change) => ({
         ...change,
@@ -130,6 +142,7 @@ export function buildRouter(filter?: (route: RouteSpec) => boolean): Router {
   for (const route of selected) {
     const chain: RequestHandler[] = [];
 
+    if (route.noStore) chain.push((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
     if (route.permission) chain.push(requirePermission(route.permission));
     // A module switched off by the super admin is refused at the API, not just
     // hidden from the menu. Signed-out routes have no tenant to check.

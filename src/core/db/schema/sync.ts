@@ -16,10 +16,13 @@ import type { Pool, PoolClient } from 'pg';
 import type { SchemaChange } from './types.js';
 import { diffSchema } from './diff.js';
 import { introspect } from './introspect.js';
-import { allTables } from './registry.js';
+import { allTables, getTable } from './registry.js';
 import { logger } from '../../util/logger.js';
-import { env } from '../../config/env.js';
 import { buildStamp } from '../../util/version.js';
+import { APP_SCHEMA, SET_SEARCH_PATH } from '../search-path.js';
+import { createIndexSql, indexName, quoteIdent } from './sql.js';
+import { ensureExtensions, qualifiedOpclass } from './extensions.js';
+import { assertMayChange } from '../protected.js';
 
 export type SyncMode = 'off' | 'verify' | 'safe' | 'force';
 
@@ -58,13 +61,31 @@ function isAllowed(change: SchemaChange, mode: SyncMode): boolean {
   return change.risk === 'warn' && mode === 'safe';
 }
 
-export async function syncSchema(pool: Pool, mode: SyncMode, appVersion = buildStamp()): Promise<SyncResult> {
+export interface SyncOptions {
+  /**
+   * Work that must happen in the same transaction, after the lock and before
+   * the comparison — db:migrate moves or removes other copies of the tables
+   * here, so a failure anywhere leaves the database exactly as it was. Returns
+   * one line per thing done, for the log and the change log.
+   */
+  prepare?: (client: PoolClient) => Promise<string[]>;
+  /** Lines describing work done just before the sync (removing other copies), written to the change log with it. */
+  alreadyDone?: string[];
+}
+
+export async function syncSchema(
+  pool: Pool,
+  mode: SyncMode,
+  appVersion = buildStamp(),
+  options: SyncOptions = {},
+): Promise<SyncResult> {
   const startedAt = Date.now();
 
   if (mode === 'off') {
     logger.warn('Schema sync is off — assuming the database already matches the code.');
     return { mode, applied: [], blocked: [], skipped: [], durationMs: 0 };
   }
+  if (mode !== 'verify') assertMayChange('change tables');
 
   const client = await pool.connect();
   try {
@@ -76,11 +97,30 @@ export async function syncSchema(pool: Pool, mode: SyncMode, appVersion = buildS
     await client.query('select pg_advisory_xact_lock($1)', [ADVISORY_LOCK_KEY.toString()]);
 
     try {
-      await client.query(`set search_path to "${env.DATABASE_SCHEMA}", app, public, extensions`);
-      await client.query(CHANGE_LOG_DDL);
+      await client.query(SET_SEARCH_PATH);
+      if (mode !== 'verify') {
+        // The schema must exist before anything is created: with nowhere on the
+        // search_path to put it, a CREATE TABLE would fail — and in the past,
+        // with another schema on the path, it quietly built a second copy there.
+        await client.query(`create schema if not exists ${quoteIdent(APP_SCHEMA)}`);
+        const prepared = [
+          ...(options.prepare ? await options.prepare(client) : []),
+          ...(await ensureExtensions(client)),
+        ];
+        await client.query(CHANGE_LOG_DDL);
+        for (const line of prepared) logger.info(`  applied  ${line}`);
+        for (const line of [...(options.alreadyDone ?? []), ...prepared]) {
+          await client.query(
+            `insert into _schema_change_log (kind, risk, table_name, description, statements, app_version)
+             values ('prepare', 'destructive', '*', $1, '{}', $2)`,
+            [line, appVersion],
+          );
+        }
+      }
 
-      const live = await introspect(client, env.DATABASE_SCHEMA);
+      const live = await introspect(client, APP_SCHEMA);
       const changes = diffSchema(live);
+      if (mode !== 'verify') await qualifyOperatorClasses(client, changes);
 
       if (changes.length === 0) {
         logger.info(
@@ -146,6 +186,22 @@ export async function syncSchema(pool: Pool, mode: SyncMode, appVersion = buildS
     }
   } finally {
     client.release();
+  }
+}
+
+/**
+ * Index definitions name operator classes bare (gin_trgm_ops). Where the
+ * extension providing one lives off the search_path — pg_trgm installed into
+ * `public` — the index is created with the class named by its schema instead.
+ * Indexes are compared by name, so this never shows up as drift.
+ */
+async function qualifyOperatorClasses(client: PoolClient, changes: SchemaChange[]): Promise<void> {
+  for (const change of changes) {
+    if (change.kind !== 'create_index' || !change.object) continue;
+    const ix = getTable(change.table)?.indexes.find((i) => indexName(change.table, i) === change.object);
+    if (!ix?.opclass) continue;
+    const opclass = await qualifiedOpclass(client, ix.opclass, ix.method ?? 'btree');
+    if (opclass !== ix.opclass) change.sql = [createIndexSql(change.table, { ...ix, opclass })];
   }
 }
 
@@ -224,12 +280,20 @@ async function applyChange(client: PoolClient, change: SchemaChange, appVersion:
   }
 }
 
-/** Read-only: what WOULD change. Used by `npm run db:migrate`. */
-export async function planSchema(pool: Pool): Promise<SchemaChange[]> {
+/**
+ * Read-only: what WOULD change. Used by `npm run db:migrate`. `schema` is the
+ * one to compare — swarnay_schema, or a copy about to be moved into it.
+ */
+export async function planSchema(pool: Pool, schema = APP_SCHEMA): Promise<SchemaChange[]> {
   const client = await pool.connect();
   try {
-    return diffSchema(await introspect(client, env.DATABASE_SCHEMA));
+    // The compared schema first on the search_path, as during the sync itself,
+    // so foreign keys within it print — and compare — without a schema prefix.
+    await client.query('begin read only');
+    await client.query(schema === APP_SCHEMA ? SET_SEARCH_PATH : `set local search_path to ${quoteIdent(schema)}, extensions`);
+    return diffSchema(await introspect(client, schema));
   } finally {
+    await client.query('rollback').catch(() => undefined);
     client.release();
   }
 }

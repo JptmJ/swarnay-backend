@@ -108,10 +108,10 @@ async function valuationRates(tx: Tx, purityIds: string[]): Promise<Map<string, 
             coalesce(own.rate, pure.rate * p.fineness_percent / 100)::numeric(14,2)::text as rate
        from purity p
        left join lateral (select coalesce(buying_rate_per_gram, rate_per_gram) as rate from metal_rate
-                           where purity_id = p.id and effective_from <= now() and (branch_id = $2 or branch_id is null)
+                           where purity_id = p.id and effective_from <= now() and retired_at is null and (branch_id = $2 or branch_id is null)
                            order by effective_from desc, branch_id nulls last limit 1) own on true
        left join lateral (select coalesce(buying_rate_per_gram, rate_per_gram) as rate from metal_rate
-                           where metal_id = p.metal_id and purity_id is null and effective_from <= now() and (branch_id = $2 or branch_id is null)
+                           where metal_id = p.metal_id and purity_id is null and effective_from <= now() and retired_at is null and (branch_id = $2 or branch_id is null)
                            order by effective_from desc, branch_id nulls last limit 1) pure on true
       where p.id = any($1::uuid[])`, [purityIds, tx.context.branchId]);
   return new Map(rows.filter((r) => r.rate).map((r) => [r.purity_id, r.rate!]));

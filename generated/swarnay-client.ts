@@ -5,11 +5,11 @@
  * into the frontend. Every type here comes from the schema that validates the
  * real request, so a mismatch between this file and the server is impossible.
  *
- * Generated 2026-10-08T14:18:00.175Z from 218 endpoints.
+ * Generated 2026-10-09T22:46:47.154Z from 226 endpoints.
  */
 
 export interface ApiError {
-  code: "validation_error" | "unauthorized" | "session_expired" | "invalid_credentials" | "account_locked" | "account_inactive" | "tenant_inactive" | "no_branch" | "rate_limited" | "forbidden" | "branch_forbidden" | "password_change_required" | "module_locked" | "module_disabled" | "module_required" | "not_found" | "duplicate" | "in_use" | "conflict" | "busy" | "check_failed" | "business_rule" | "insufficient_stock" | "rate_missing" | "numbering_series_missing" | "already_posted" | "backdating_not_allowed" | "invalid_stage_move" | "internal_error" | (string & {});
+  code: "validation_error" | "unauthorized" | "session_expired" | "invalid_credentials" | "account_locked" | "account_inactive" | "tenant_inactive" | "no_branch" | "rate_limited" | "forbidden" | "branch_forbidden" | "password_change_required" | "module_locked" | "module_disabled" | "module_required" | "not_found" | "duplicate" | "in_use" | "conflict" | "busy" | "check_failed" | "business_rule" | "insufficient_stock" | "rate_missing" | "numbering_series_missing" | "already_posted" | "backdating_not_allowed" | "invalid_stage_move" | "vault_disabled" | "vault_not_allowed" | "vault_passcode_invalid" | "vault_locked" | "vault_passcode_required" | "internal_error" | (string & {});
   message: string;
   details?: unknown;
   requestId?: string;
@@ -1318,11 +1318,15 @@ export function createClient(options: ClientOptions) {
      * Today’s rate for every active purity
      *
      * One row per active purity, with its latest rate (a branch rate beats the shared one) and the last rate before today, for the day’s change. A purity with no rate yet has null rate fields — POS refuses to bill it with `rate_missing`.
+     * 
+     * Send `configured=true` for the Rates screen: only the metal + purity pairs the shop has set a rate for. `is_today` is false for a rate last set before today (shop time zone), so the screen can ask for today’s rate.
      * `GET /api/master/rates/current`
      * Requires `master.rates.view`.
      */
     getMasterRatesCurrent(query?: {
       branchId?: string;
+      /** true = only purities that have a rate. */
+      configured?: "true" | "false";
     }): Promise<{
       rates: Array<{
         purity_id: string;
@@ -1339,6 +1343,12 @@ export function createClient(options: ClientOptions) {
         source: unknown;
         /** Last rate set before today (shop time zone). */
         previous_rate_per_gram: string | null;
+        /** Null = the rate is shared by every branch. */
+        rate_branch_id: string | null;
+        /** Who set the current rate. */
+        set_by_name: unknown;
+        /** The current rate was set today. */
+        is_today: boolean;
       }>;
     }> {
       return request<{
@@ -1357,13 +1367,19 @@ export function createClient(options: ClientOptions) {
         source: unknown;
         /** Last rate set before today (shop time zone). */
         previous_rate_per_gram: string | null;
+        /** Null = the rate is shared by every branch. */
+        rate_branch_id: string | null;
+        /** Who set the current rate. */
+        set_by_name: unknown;
+        /** The current rate was set today. */
+        is_today: boolean;
       }>;
     }>('GET', "/api/master/rates/current", { query });
     },
     /**
-     * Broadcast a new rate
+     * Set today’s rate for a metal and purity
      *
-     * A new rate is a new row — rates are never edited. Yesterday’s invoices keep pointing at yesterday’s rate, so an old bill can always be explained.
+     * A new rate is a new row — rates are never edited. Yesterday’s invoices keep pointing at yesterday’s rate, so an old bill can always be explained. Setting a rate for a purity that was removed puts it back on the list. Every screen that picks a metal and purity — billing, orders, old gold, purchase, schemes — uses the latest rate set here.
      * `POST /api/master/rates`
      * Requires `master.rates.create`.
      */
@@ -1371,9 +1387,9 @@ export function createClient(options: ClientOptions) {
       metal_id: string;
       /** Omit for a pure-metal rate. */
       purity_id?: string;
-      /** Selling rate. */
+      /** Sale / billing rate. */
       rate_per_gram: string;
-      /** What you pay for old gold. Normally lower. */
+      /** Purchase / buying rate — what you pay for old gold. Normally lower. */
       buying_rate_per_gram?: string;
       /** Omit to broadcast to every branch. */
       branch_id?: string;
@@ -1383,8 +1399,23 @@ export function createClient(options: ClientOptions) {
       return request<Record<string, unknown>>('POST', "/api/master/rates", { body });
     },
     /**
+     * Remove a metal + purity from the rate list
+     *
+     * Nothing is deleted: its rates stay in history and on every bill that used them, but no new price is taken from them, so billing that purity is refused with `rate_missing` until a rate is set again. Applies to every branch.
+     * `DELETE /api/master/rates/:purityId`
+     * Requires `master.rates.delete`.
+     */
+    deleteMasterRatesByPurityId(params: { purityId: string }): Promise<{
+      retired: number;
+    }> {
+      return request<{
+      retired: number;
+    }>('DELETE', `/api/master/rates/${encodeURIComponent(params.purityId)}`);
+    },
+    /**
      * Rate history for a purity
      *
+     * Every rate set in the window, newest first, including removed ones (`retired_at` set) and who set each.
      * `GET /api/master/rates/history`
      * Requires `master.rates.view`.
      */
@@ -2039,7 +2070,7 @@ export function createClient(options: ClientOptions) {
         grossWeight?: string;
         /** Grams, as a string. */
         stoneWeight?: string;
-        /** Falls back to the order’s locked rate. */
+        /** Falls back to the order’s locked rate, then today’s sale rate in Masters → Rates for the line’s purity. */
         ratePerGram?: string;
         makingBasis?: "per_gram" | "percent" | "flat";
         makingRate?: string;
@@ -2150,6 +2181,47 @@ export function createClient(options: ClientOptions) {
       acknowledgedByName?: string;
     }): Promise<Record<string, unknown>> {
       return request<Record<string, unknown>>('POST', `/api/orders/${encodeURIComponent(params.id)}/acknowledge`, { body });
+    },
+    /**
+     * Import orders in bulk
+     *
+     * Up to 1,000 rows a call; send a big file as several calls, passing `firstRow` so problems name the spreadsheet row. One row = one order with one line, at the branch in `X-Branch-Id`.
+     * 
+     * **Customer**: matched on `customer_code`, else `customer_phone`. A phone nobody has yet becomes a new customer when `customer_name` is given.
+     * **Price**: `rate_per_gram`, else today’s sale rate in Masters → Rates for the purity. A purity with weight and no rate anywhere is refused (repairs excepted).
+     * **Stage**: a stage key of that order type’s pipeline (default: its first). A terminal stage imports the order as completed.
+     * **reference**: the old order number; a reference already imported is skipped, not duplicated.
+     * 
+     * Past order dates are allowed here even when back-dating is switched off, since bringing old orders across is the point.
+     * `POST /api/orders/import`
+     * Requires `orders.import`.
+     */
+    postOrdersImport(body: {
+      rows: Array<Record<string, unknown>>;
+      /** Spreadsheet row of rows[0] — 2 when row 1 holds the headings. */
+      firstRow?: number;
+    }): Promise<{
+      received: number;
+      inserted: number;
+      /** Rows whose reference was imported before. */
+      skipped: number;
+      customersCreated: number;
+      failed: Array<{
+        row: number;
+        message: string;
+      }>;
+    }> {
+      return request<{
+      received: number;
+      inserted: number;
+      /** Rows whose reference was imported before. */
+      skipped: number;
+      customersCreated: number;
+      failed: Array<{
+        row: number;
+        message: string;
+      }>;
+    }>('POST', "/api/orders/import", { body });
     },
     /**
      * Old Gold settings in force
@@ -3124,27 +3196,235 @@ export function createClient(options: ClientOptions) {
       return request<Record<string, unknown>>('POST', `/api/purchase/settlements/${encodeURIComponent(params.id)}/cancel`, { body });
     },
     /**
-     * Open the private screen
+     * Can this person unlock private figures?
      *
-     * Checks the private screen password. Five wrong tries lock the user out for five minutes.
-     * `POST /api/private-screen/unlock`
+     * Whether the vault is on for this business and whether the signed-in person may unlock it. No secret is returned. When `canUnlock` is false, show `message` instead of the passcode box.
+     * `GET /api/security/vault`
+     * Requires `settings.vault.unlock`.
      */
-    postPrivatescreenUnlock(body: {
-      password: string;
-    }): Promise<Record<string, unknown>> {
-      return request<Record<string, unknown>>('POST', "/api/private-screen/unlock", { body });
+    getSecurityVault(): Promise<{
+      /** False = switched off by the super admin; private figures stay hidden. */
+      enabled: boolean;
+      canUnlock: boolean;
+      /** How long one unlock lasts. */
+      unlockMinutes: number;
+      reason: "disabled" | "role" | null;
+      /** Plain-English reason when canUnlock is false. */
+      message: unknown;
+    }> {
+      return request<{
+      /** False = switched off by the super admin; private figures stay hidden. */
+      enabled: boolean;
+      canUnlock: boolean;
+      /** How long one unlock lasts. */
+      unlockMinutes: number;
+      reason: "disabled" | "role" | null;
+      /** Plain-English reason when canUnlock is false. */
+      message: unknown;
+    }>('GET', "/api/security/vault");
     },
     /**
-     * Change the private screen password
+     * Unlock private figures with the vault passcode
      *
-     * `POST /api/private-screen/password`
-     * Requires `settings.config.update`.
+     * Checks the passcode against the hash the super admin set. Five wrong tries lock that person out for 15 minutes. The token is valid for the configured minutes, and stops working early if the vault is switched off or re-configured, or the person’s password or role changes.
+     * `POST /api/security/vault/unlock`
+     * Requires `settings.vault.unlock`.
      */
-    postPrivatescreenPassword(body: {
-      currentPassword: string;
-      newPassword: string;
-    }): Promise<Record<string, unknown>> {
-      return request<Record<string, unknown>>('POST', "/api/private-screen/password", { body });
+    postSecurityVaultUnlock(body: {
+      passcode: string;
+    }): Promise<{
+      token: string;
+      /** Unix milliseconds. */
+      expiresAt: number;
+    }> {
+      return request<{
+      token: string;
+      /** Unix milliseconds. */
+      expiresAt: number;
+    }>('POST', "/api/security/vault/unlock", { body });
+    },
+    /**
+     * Is this unlock still good?
+     *
+     * Send the token from unlock. Returns its expiry, or `null` once it has expired or been ended for any reason — then lock the screen.
+     * `POST /api/security/vault/session`
+     * Requires `settings.vault.unlock`.
+     */
+    postSecurityVaultSession(body: {
+      /** The token returned by unlock. Keep it in memory for this tab only. */
+      token: string;
+    }): Promise<{
+      /** Unix milliseconds. */
+      expiresAt: number;
+    } | null> {
+      return request<{
+      /** Unix milliseconds. */
+      expiresAt: number;
+    } | null>('POST', "/api/security/vault/session", { body });
+    },
+    /**
+     * Lock private figures now
+     *
+     * `POST /api/security/vault/lock`
+     * Requires `settings.vault.unlock`.
+     */
+    postSecurityVaultLock(body: {
+      /** The token returned by unlock. Keep it in memory for this tab only. */
+      token: string;
+    }): Promise<void> {
+      return request<void>('POST', "/api/security/vault/lock", { body });
+    },
+    /**
+     * A business’s security vault and private entry settings
+     *
+     * The passcode itself is never returned — only whether one is set. Includes how many vault unlocks are open right now and who is locked out.
+     * `GET /api/platform/tenants/:id/security`
+     * Requires `platform.tenants.view`.
+     */
+    getPlatformTenantsByIdSecurity(params: { id: string }): Promise<{
+      vault: {
+        enabled: boolean;
+        hasPasscode: boolean;
+        passcodeChangedAt: unknown;
+        unlockMinutes: number;
+        allowedRoleTypes: Array<"owner" | "admin" | "staff">;
+        revision: number;
+        updatedAt: unknown;
+      };
+      gateway: {
+        enabled: boolean;
+        path: string;
+        points: Array<{
+          x: number;
+          y: number;
+        }>;
+        revision: number;
+        updatedAt: unknown;
+      };
+      activeUnlocks: number;
+      lockouts: Array<{
+        kind: "vault" | "gateway";
+        userId: string;
+        userName: string;
+        lockedUntil: string;
+      }>;
+    }> {
+      return request<{
+      vault: {
+        enabled: boolean;
+        hasPasscode: boolean;
+        passcodeChangedAt: unknown;
+        unlockMinutes: number;
+        allowedRoleTypes: Array<"owner" | "admin" | "staff">;
+        revision: number;
+        updatedAt: unknown;
+      };
+      gateway: {
+        enabled: boolean;
+        path: string;
+        points: Array<{
+          x: number;
+          y: number;
+        }>;
+        revision: number;
+        updatedAt: unknown;
+      };
+      activeUnlocks: number;
+      lockouts: Array<{
+        kind: "vault" | "gateway";
+        userId: string;
+        userName: string;
+        lockedUntil: string;
+      }>;
+    }>('GET', `/api/platform/tenants/${encodeURIComponent(params.id)}/security`);
+    },
+    /**
+     * Switch the vault on or off, set its passcode and who may unlock it
+     *
+     * Send the whole setting with the `revision` you loaded; a stale revision gets 409. Leave `passcode` out to keep the current one. Every save locks the vault for everyone who had it open, and a new passcode clears old wrong-try lockouts.
+     * `PUT /api/platform/tenants/:id/security/vault`
+     * Requires `platform.tenants.update`.
+     */
+    putPlatformTenantsByIdSecurityVault(params: { id: string }, body: {
+      enabled: boolean;
+      /** Only when setting or changing it. Never stored readable. */
+      passcode?: string;
+      /** How long one unlock lasts. */
+      unlockMinutes: number;
+      /** owner, admin (branch admins) and/or staff. */
+      allowedRoleTypes: Array<"owner" | "admin" | "staff">;
+      revision: number;
+    }): Promise<{
+      enabled: boolean;
+      hasPasscode: boolean;
+      passcodeChangedAt: unknown;
+      unlockMinutes: number;
+      allowedRoleTypes: Array<"owner" | "admin" | "staff">;
+      revision: number;
+      updatedAt: unknown;
+    }> {
+      return request<{
+      enabled: boolean;
+      hasPasscode: boolean;
+      passcodeChangedAt: unknown;
+      unlockMinutes: number;
+      allowedRoleTypes: Array<"owner" | "admin" | "staff">;
+      revision: number;
+      updatedAt: unknown;
+    }>('PUT', `/api/platform/tenants/${encodeURIComponent(params.id)}/security/vault`, { body });
+    },
+    /**
+     * Set the private entry path and its three points
+     *
+     * Points are normalised over the 404 artwork (x 0.07–0.93, y 0.10–0.90) and at least 96 artwork units apart. Switching it on needs a valid path and three points. Every save ends any open private-entry grant.
+     * `PUT /api/platform/tenants/:id/security/gateway`
+     * Requires `platform.tenants.update`.
+     */
+    putPlatformTenantsByIdSecurityGateway(params: { id: string }, body: {
+      enabled: boolean;
+      /** e.g. /quiet-door. Lowercase letters, digits and hyphens; not a path the app uses. */
+      path: string;
+      points: Array<{
+        x: number;
+        y: number;
+      }>;
+      revision: number;
+    }): Promise<{
+      enabled: boolean;
+      path: string;
+      points: Array<{
+        x: number;
+        y: number;
+      }>;
+      revision: number;
+      updatedAt: unknown;
+    }> {
+      return request<{
+      enabled: boolean;
+      path: string;
+      points: Array<{
+        x: number;
+        y: number;
+      }>;
+      revision: number;
+      updatedAt: unknown;
+    }>('PUT', `/api/platform/tenants/${encodeURIComponent(params.id)}/security/gateway`, { body });
+    },
+    /**
+     * Let locked-out people try again now
+     *
+     * Omit `userId` to clear everyone in this business.
+     * `POST /api/platform/tenants/:id/security/lockouts/clear`
+     * Requires `platform.tenants.update`.
+     */
+    postPlatformTenantsByIdSecurityLockoutsClear(params: { id: string }, body: {
+      userId?: string;
+    }): Promise<{
+      cleared: number;
+    }> {
+      return request<{
+      cleared: number;
+    }>('POST', `/api/platform/tenants/${encodeURIComponent(params.id)}/security/lockouts/clear`, { body });
     },
     /**
      * Stock totals for the header cards
