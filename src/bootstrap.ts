@@ -14,6 +14,7 @@ import './core/config/config-service.js';
 import './modules/tenancy/tenancy.schema.js';
 import './modules/identity/identity.schema.js';
 import './modules/platform/platform.schema.js';
+import './modules/security/security.schema.js';
 
 /* reference data */
 import './modules/masters/masters.schema.js';

@@ -4,7 +4,9 @@ import { defineRoute } from '../core/http/route-registry.js';
 import { defineCrud } from './crud.js';
 import { transaction, type Tx } from '../core/db/client.js';
 import { repo } from '../core/db/repository.js';
-import { BusinessRuleError, ForbiddenError, ValidationError } from '../core/errors/app-error.js';
+import { BusinessRuleError, ForbiddenError, NotFoundError, ValidationError } from '../core/errors/app-error.js';
+import { recordAudit } from '../core/audit.js';
+import { param } from '../core/http/middleware.js';
 import {
   assertBranchAllowance, assertBranchCodeFree, seedBranchLocations, type BranchKind,
 } from '../modules/tenancy/branch.service.js';
@@ -341,68 +343,87 @@ defineCrud({
 
 /* ------------------------------------------------------------ rate hub */
 
+const RATES_DAY = '2026-10-10';
+
 defineRoute({
   method: 'get', path: '/api/master/rates/current', module: 'master',
   summary: 'Today’s rate for every active purity',
   description:
-    'One row per active purity, with its latest rate (a branch rate beats the shared one) and the last rate before today, for the day’s change. A purity with no rate yet has null rate fields — POS refuses to bill it with `rate_missing`.',
+    'One row per active purity, with its latest rate (a branch rate beats the shared one) and the last rate before today, for the day’s change. A purity with no rate yet has null rate fields — POS refuses to bill it with `rate_missing`.\n\n' +
+    'Send `configured=true` for the Rates screen: only the metal + purity pairs the shop has set a rate for. `is_today` is false for a rate last set before today (shop time zone), so the screen can ask for today’s rate.',
   permission: 'master.rates.view',
-  query: z.object({ branchId: uuid.optional() }),
+  query: z.object({
+    branchId: uuid.optional(),
+    configured: boolParam.optional().describe('true = only purities that have a rate.'),
+  }),
   responses: [{ status: 200, description: 'Current rates.', schema: z.object({ rates: z.array(z.object({
     purity_id: uuid, purity_code: z.string(), purity_name: z.string(), fineness_percent: decimal,
     metal_id: uuid, metal_code: z.string(), metal_name: z.string(),
     id: uuid.nullable(), rate_per_gram: money.nullable(), buying_rate_per_gram: money.nullable(),
     effective_from: z.string().nullable(), source: z.string().nullable(),
     previous_rate_per_gram: money.nullable().describe('Last rate set before today (shop time zone).'),
+    rate_branch_id: uuid.nullable().describe('Null = the rate is shared by every branch.'),
+    set_by_name: z.string().nullable().describe('Who set the current rate.'),
+    is_today: z.boolean().describe('The current rate was set today.'),
   })) }) }],
   changelog: [
     ...seed,
     { date: TODAY, kind: 'changed', note: 'Branch rates now override the shared rate.' },
     { date: MASTERS_DAY, kind: 'changed', note: 'One row per active purity, including purities with no rate yet. Adds metal_name, purity_name, source and previous_rate_per_gram.' },
+    { date: RATES_DAY, kind: 'added', note: '`configured=true` lists only purities with a rate. Adds rate_branch_id, set_by_name and is_today. Removed rates are left out.' },
   ],
-  handler: async (req) => transaction(async (tx) => ({
-    rates: await tx.query(
-      `select p.id as purity_id, p.code as purity_code, p.name as purity_name, p.fineness_percent,
-              m.id as metal_id, m.code as metal_code, m.name as metal_name,
-              r.id, r.rate_per_gram, r.buying_rate_per_gram, r.effective_from, r.source,
-              prev.rate_per_gram as previous_rate_per_gram
-         from purity p
-         join metal m on m.id = p.metal_id and m.is_active
-         cross join (select date_trunc('day', now() at time zone timezone) at time zone timezone as day_start
-                       from tenant where id = $2) t
-         left join lateral (
-           select id, rate_per_gram, buying_rate_per_gram, effective_from, source from metal_rate
-            where purity_id = p.id and effective_from <= now() and (branch_id = $1 or branch_id is null)
-            order by effective_from desc, branch_id nulls last limit 1) r on true
-         left join lateral (
-           select rate_per_gram from metal_rate
-            where purity_id = p.id and effective_from < t.day_start and (branch_id = $1 or branch_id is null)
-            order by effective_from desc, branch_id nulls last limit 1) prev on true
-        where p.is_active
-        order by m.sort_order, p.sort_order, p.code`,
-      [(req.query as { branchId?: string }).branchId ?? req.ctx?.branchId ?? null, tx.context.tenantId]),
-  })),
+  handler: async (req) => {
+    const q = req.query as { branchId?: string; configured?: boolean };
+    return transaction(async (tx) => ({
+      rates: await tx.query(
+        `select p.id as purity_id, p.code as purity_code, p.name as purity_name, p.fineness_percent,
+                m.id as metal_id, m.code as metal_code, m.name as metal_name,
+                r.id, r.rate_per_gram, r.buying_rate_per_gram, r.effective_from, r.source,
+                r.branch_id as rate_branch_id, u.full_name as set_by_name,
+                coalesce(r.effective_from >= t.day_start, false) as is_today,
+                prev.rate_per_gram as previous_rate_per_gram
+           from purity p
+           join metal m on m.id = p.metal_id and m.is_active
+           cross join (select date_trunc('day', now() at time zone timezone) at time zone timezone as day_start
+                         from tenant where id = $2) t
+           left join lateral (
+             select id, rate_per_gram, buying_rate_per_gram, effective_from, source, branch_id, created_by from metal_rate
+              where purity_id = p.id and effective_from <= now() and retired_at is null and (branch_id = $1 or branch_id is null)
+              order by effective_from desc, branch_id nulls last limit 1) r on true
+           left join app_user u on u.id = r.created_by
+           left join lateral (
+             select rate_per_gram from metal_rate
+              where purity_id = p.id and effective_from < t.day_start and retired_at is null and (branch_id = $1 or branch_id is null)
+              order by effective_from desc, branch_id nulls last limit 1) prev on true
+          where p.is_active ${q.configured ? 'and r.id is not null' : ''}
+          order by m.sort_order, p.sort_order, p.code`,
+        [q.branchId ?? req.ctx?.branchId ?? null, tx.context.tenantId]),
+    }));
+  },
 });
 
 defineRoute({
   method: 'post', path: '/api/master/rates', module: 'master',
-  summary: 'Broadcast a new rate',
+  summary: 'Set today’s rate for a metal and purity',
   description:
-    'A new rate is a new row — rates are never edited. Yesterday’s invoices keep pointing at yesterday’s rate, so an old bill can always be explained.',
+    'A new rate is a new row — rates are never edited. Yesterday’s invoices keep pointing at yesterday’s rate, so an old bill can always be explained. Setting a rate for a purity that was removed puts it back on the list. Every screen that picks a metal and purity — billing, orders, old gold, purchase, schemes — uses the latest rate set here.',
   permission: 'master.rates.create',
   body: z.object({
     metal_id: uuid, purity_id: uuid.optional().describe('Omit for a pure-metal rate.'),
-    rate_per_gram: money.describe('Selling rate.'),
-    buying_rate_per_gram: money.optional().describe('What you pay for old gold. Normally lower.'),
+    rate_per_gram: money.describe('Sale / billing rate.'),
+    buying_rate_per_gram: money.optional().describe('Purchase / buying rate — what you pay for old gold. Normally lower.'),
     branch_id: uuid.optional().describe('Omit to broadcast to every branch.'),
     effective_from: z.string().datetime().optional().describe('Defaults to now.'),
   }),
   responses: [
     { status: 201, description: 'Rate broadcast.', schema: record },
     { status: 400, description: 'Buying rate above selling rate, or the purity belongs to another metal.', schema: errorEnvelope },
-    { status: 422, description: 'Rate must be greater than zero.', schema: errorEnvelope },
+    { status: 422, description: 'Rate must be greater than zero, or the metal / purity is switched off.', schema: errorEnvelope },
   ],
-  changelog: seed,
+  changelog: [
+    ...seed,
+    { date: RATES_DAY, kind: 'changed', note: 'Refuses a metal or purity that is switched off, and puts a removed purity back on the rate list.' },
+  ],
   handler: async (req, res) => {
     const { metal_id, purity_id, rate_per_gram, buying_rate_per_gram, branch_id } = req.body;
     if (branch_id && !req.accessInfo!.branches.some((b) => b.id === branch_id)) {
@@ -412,30 +433,66 @@ defineRoute({
       throw new ValidationError('The buying rate cannot be higher than the selling rate.');
     }
     const rate = await transaction(async (tx) => {
+      const metal = await tx.maybeOne<{ name: string; is_active: boolean }>(`select name, is_active from metal where id = $1`, [metal_id]);
+      if (!metal) throw new ValidationError('That metal does not exist.');
+      if (!metal.is_active) throw new BusinessRuleError(`${metal.name} is switched off in Masters → Purity.`, 'check_failed');
       if (purity_id) {
-        const purity = await tx.maybeOne<{ metal_id: string }>(`select metal_id from purity where id = $1`, [purity_id]);
+        const purity = await tx.maybeOne<{ metal_id: string; code: string; is_active: boolean }>(
+          `select metal_id, code, is_active from purity where id = $1`, [purity_id]);
         if (!purity || purity.metal_id !== metal_id) {
           throw new ValidationError('That purity does not belong to the selected metal.');
         }
+        if (!purity.is_active) throw new BusinessRuleError(`${purity.code} is switched off in Masters → Purity.`, 'check_failed');
       }
-      return repo(tx, 'metal_rate').insert(req.body);
+      const row = await repo(tx, 'metal_rate').insert(req.body) as { id: string };
+      await recordAudit(tx, 'metal_rate.set', 'metal_rate', row.id, { metal_id, purity_id, rate_per_gram, buying_rate_per_gram, branch_id });
+      return row;
     });
     res.status(201).json(rate);
   },
 });
 
 defineRoute({
+  method: 'delete', path: '/api/master/rates/:purityId', module: 'master',
+  summary: 'Remove a metal + purity from the rate list',
+  description:
+    'Nothing is deleted: its rates stay in history and on every bill that used them, but no new price is taken from them, so billing that purity is refused with `rate_missing` until a rate is set again. Applies to every branch.',
+  permission: 'master.rates.delete',
+  params: z.object({ purityId: uuid }),
+  responses: [
+    { status: 200, description: 'Removed.', schema: z.object({ retired: z.number() }) },
+    { status: 404, description: 'That purity has no rate on the list.', schema: errorEnvelope },
+  ],
+  changelog: [{ date: RATES_DAY, kind: 'added', note: 'Remove a rate from the list without losing its history.' }],
+  handler: async (req) => transaction(async (tx) => {
+    const purityId = param(req, 'purityId');
+    const rows = await tx.query<{ id: string }>(
+      `update metal_rate set retired_at = now(), updated_at = now(), updated_by = $2
+        where purity_id = $1 and retired_at is null returning id`, [purityId, tx.context.userId]);
+    if (!rows.length) throw new NotFoundError('Rate for that purity');
+    await recordAudit(tx, 'metal_rate.retire', 'purity', purityId, { rows: rows.length });
+    return { retired: rows.length };
+  }),
+});
+
+defineRoute({
   method: 'get', path: '/api/master/rates/history', module: 'master',
   summary: 'Rate history for a purity',
+  description: 'Every rate set in the window, newest first, including removed ones (`retired_at` set) and who set each.',
   permission: 'master.rates.view',
   query: z.object({ purityId: uuid, days: z.coerce.number().int().min(1).max(365).default(30) }),
   responses: [{ status: 200, description: 'Rates, newest first.', schema: z.object({ rows: z.array(record) }) }],
-  changelog: seed,
+  changelog: [
+    ...seed,
+    { date: RATES_DAY, kind: 'changed', note: 'Adds buying rate, branch, retired_at and set_by_name.' },
+  ],
   handler: async (req) => transaction(async (tx) => {
     const q = req.query as unknown as { purityId: string; days: number };
     return { rows: await tx.query(
-      `select id, rate_per_gram, buying_rate_per_gram, effective_from, source
-         from metal_rate where purity_id = $1 and effective_from > now() - make_interval(days => $2)
-        order by effective_from desc`, [q.purityId, q.days]) };
+      `select r.id, r.rate_per_gram, r.buying_rate_per_gram, r.effective_from, r.source, r.retired_at,
+              r.branch_id, b.name as branch_name, u.full_name as set_by_name
+         from metal_rate r left join branch b on b.id = r.branch_id left join app_user u on u.id = r.created_by
+        where r.purity_id = $1 and r.effective_from > now() - make_interval(days => $2)
+        order by r.effective_from desc`, [q.purityId, q.days]) };
   }),
 });

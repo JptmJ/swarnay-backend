@@ -9,7 +9,7 @@
  */
 import type { PoolClient, QueryResultRow } from 'pg';
 import { pool } from './pool.js';
-import { env } from '../config/env.js';
+import { SET_SEARCH_PATH } from './search-path.js';
 import { getContext, platformContext, requireContext, runWithContext } from '../context/request-context.js';
 import type { RequestContext } from '../context/request-context.js';
 import { logger } from '../util/logger.js';
@@ -93,8 +93,8 @@ export async function transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
     // `tenantId` is UUID-validated above, so the literal is safe to inline.
     await client.query(
       context.bypassRls
-        ? `begin; set local app.bypass_rls = 'on'; set local app.tenant_id = '${tenantId}'; set search_path to "${env.DATABASE_SCHEMA}", app, public, extensions;`
-        : `begin; set local app.tenant_id = '${tenantId}'; set search_path to "${env.DATABASE_SCHEMA}", app, public, extensions;`,
+        ? `begin; set local app.bypass_rls = 'on'; set local app.tenant_id = '${tenantId}'; ${SET_SEARCH_PATH};`
+        : `begin; set local app.tenant_id = '${tenantId}'; ${SET_SEARCH_PATH};`,
     );
 
     const tx = wrap(client, context);

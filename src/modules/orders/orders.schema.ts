@@ -124,9 +124,15 @@ export const retailOrderTable = defineTable({
     cancel_reason: col.text(),
     /** Set when the order is billed out through POS. */
     sales_invoice_id: col.fk('sales_invoice'),
+    /**
+     * The order's number in the software it was imported from. Importing the
+     * same file again skips rows whose reference is already here.
+     */
+    external_reference: col.text({ comment: 'Order number from the previous software, for imported orders.' }),
   },
   uniques: [{ columns: ['order_number'] }],
   indexes: [
+    { name: 'ux_retail_order_external_reference', columns: ['external_reference'], unique: true, where: 'external_reference is not null' },
     { columns: ['order_type', 'stage'] },
     { columns: ['customer_id', 'order_date'] },
     { columns: ['branch_id', 'order_date'] },

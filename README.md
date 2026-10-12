@@ -11,7 +11,7 @@ See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for how it is built and why
 
 ```bash
 npm install
-cp .env.example .env      # paste your DATABASE_URL
+cp .env.example .env      # fill in your database URL(s) and pick one with DB_TARGET
 npm run db:migrate        # create/update the tables
 npm run seed:superadmin -- --password='...'   # the one super admin
 npm run db:seed           # demo tenants you can log into
@@ -33,10 +33,12 @@ Level Security, which is what keeps tenants apart. Create a dedicated role:
 
 ```sql
 CREATE ROLE swarnay_app LOGIN PASSWORD '...' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+-- CREATE on the database lets the app make its own schema, swarnay_schema,
+-- and install pg_trgm; `npm run db:migrate` does both.
 GRANT ALL ON DATABASE your_db TO swarnay_app;
-GRANT ALL ON SCHEMA public TO swarnay_app;
-ALTER SCHEMA public OWNER TO swarnay_app;
 ```
+
+Every table lives in `swarnay_schema` — see [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
 
 Postgres 15 or newer (uses `UNIQUE NULLS NOT DISTINCT`).
 
@@ -47,10 +49,10 @@ Postgres 15 or newer (uses `UNIQUE NULLS NOT DISTINCT`).
 | Command | What it does |
 |---|---|
 | `npm run dev` | Sync the schema, then serve on :4000 with reload |
-| `npm run db:migrate` | Make the tables match the code. `-- --dry-run` only shows the changes; `-- --force` also applies blocked (data-deleting) ones |
+| `npm run db:migrate` | Make the database match the code, in `swarnay_schema`. `-- --dry-run` only shows the changes; `-- --force` also applies blocked (data-deleting) ones, including removing other copies of the tables (`public`, `app`, …); `-- --force --keep-data-from=<schema>` first moves that copy's rows into `swarnay_schema` |
 | `npm run seed:superadmin` | Create or reset the super admin (`-- --password=...`) |
 | `npm run db:seed` | Create demo tenants with branches, users and data (`-- --fresh` recreates them). Needs the super admin first |
-| `npm test` | Run the test suite |
+| `npm test` | Run the test suite — needs a `.env.test` pointing at a database used only by the tests |
 | `npm run typecheck` | Type-check without emitting |
 | `npm run build` | Compile to `dist/` |
 
@@ -107,10 +109,15 @@ No migration files. The database is brought in line with the code on boot.
 
 ## Environment
 
+Which database a laptop uses, and how the ERP and super admin pick a backend, is
+explained in [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
+
 | Variable | Default | Notes |
 |---|---|---|
-| `DATABASE_URL` | — | Required |
+| `DB_TARGET` | — | Developers: `local`, `supabase` or `deployed`. Picks `DATABASE_URL_<TARGET>` / `DATABASE_SSL_<TARGET>`. `deployed` is protected |
+| `DATABASE_URL` | — | Servers (production, CI) set this instead of `DB_TARGET`. One of the two is required |
 | `DATABASE_SSL` | `false` | `true`, `false`, or `no-verify` for managed providers |
+| — | — | Every table lives in the schema `swarnay_schema`; it is not configurable (`DATABASE_SCHEMA` is refused) |
 | `SCHEMA_SYNC_MODE` | `safe` | `off` · `verify` · `safe` · `force` — use **`verify`** in production |
 | `JWT_SECRET` | — | Required, 16+ characters |
 | `PORT` | `4000` | |

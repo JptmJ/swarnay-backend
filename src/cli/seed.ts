@@ -19,16 +19,23 @@ import '../api/index.js';
 import { closePool, checkConnection, pool } from '../core/db/pool.js';
 import { asPlatform } from '../core/db/client.js';
 import { syncSchema } from '../core/db/schema/sync.js';
-import { isProduction } from '../core/config/env.js';
-import { createDemoTenant, deleteTenantData, MAX_DEMOS_PER_JOB } from '../modules/platform/demo.service.js';
+import { isProduction, isProtectedDatabase } from '../core/config/env.js';
+import { createBranch, createTenant, createTenantUser } from '../modules/platform/provisioning.service.js';
+import { createOrder } from '../modules/orders/orders.service.js';
+import { checkout } from '../modules/sales/sales.service.js';
+import { createInward } from '../modules/purchase/purchase.service.js';
+import { repo } from '../core/db/repository.js';
+import { logger } from '../core/util/logger.js';
+import type { Tx } from '../core/db/client.js';
+import type { TenantKind } from '../modules/tenancy/module-catalog.js';
 
 const has = (flag: string): boolean => process.argv.includes(`--${flag}`);
 const valueOf = (flag: string): string | undefined =>
   process.argv.find((a) => a.startsWith(`--${flag}=`))?.split('=')[1];
 
 async function main(): Promise<void> {
-  if (isProduction) {
-    console.error('\nRefusing to seed demo data while NODE_ENV=production. Use the console’s Demo accounts button.\n');
+  if (isProduction || isProtectedDatabase) {
+    console.error(`\nRefusing to seed demo data ${isProduction ? 'while NODE_ENV=production' : 'into the deployed database (DB_TARGET=deployed)'}.\n`);
     process.exitCode = 1;
     return;
   }

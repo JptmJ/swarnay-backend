@@ -1,9 +1,9 @@
 # Swarnay — Database Reference
 
-Generated from the schema definitions on 2026-10-10.
+Generated from the schema definitions on 2026-10-09.
 **Do not edit by hand** — run `npm run gen:docs`.
 
-98 tables · 2125 columns.
+89 tables · 1841 columns.
 
 ---
 
@@ -47,12 +47,13 @@ A few conventions worth knowing:
 | masters | 13 | `branch`, `document_format`, `hsn_gst_rate`, `item`, `item_category`, `metal`, `metal_rate`, `party`, `payment_method`, `payment_method_branch`, `price_rule`, `purity`, `stock_location` |
 | Document numbering | 2 | `numbering_gap`, `numbering_series` |
 | Old Gold Exchange & Melt | 4 | `melt_batch`, `old_gold_intake`, `old_gold_item`, `old_gold_payout` |
-| Custom Orders & Karigar | 10 | `karigar_job`, `order_acknowledgement`, `order_attachment`, `order_communication`, `order_custody_item`, `order_line`, `order_payment`, `order_pipeline`, `order_stage_event`, `retail_order` |
+| Custom Orders & Karigar | 8 | `order_acknowledgement`, `order_attachment`, `order_communication`, `order_line`, `order_payment`, `order_pipeline`, `order_stage_event`, `retail_order` |
 | Platform Operator & SaaS Admin | 5 | `platform_audit_log`, `platform_refresh_token`, `platform_user`, `support_session`, `tenant_module` |
 | Purchase | 8 | `goods_receipt`, `goods_receipt_line`, `purchase_invoice`, `purchase_order`, `purchase_order_line`, `purchase_return`, `purchase_return_line`, `supplier_settlement` |
 | Executive & Owner BI | 6 | `report_alert`, `report_inbox`, `report_pin`, `report_run`, `report_schedule`, `report_view` |
 | Sales / POS | 8 | `approval_memo`, `approval_memo_line`, `customer_receipt`, `sales_invoice`, `sales_invoice_line`, `sales_payment`, `sales_return`, `sales_return_line` |
 | Swarna Nidhi (Chit Schemes) | 4 | `scheme_account`, `scheme_installment`, `scheme_plan`, `scheme_redemption` |
+| Security vault & private entry | 4 | `private_gateway`, `security_grant`, `security_lockout`, `security_vault` |
 | Settings & Theme Studio | 1 | `tenant_theme` |
 | Tagging & Barcoding | 4 | `huid_assignment`, `tag_print_job`, `tag_print_job_item`, `tag_template` |
 | Tenancy | 1 | `tenant` |
@@ -1066,6 +1067,7 @@ Historic rates are never edited — a new rate is a new row, so old invoices sta
 | `buying_rate_per_gram` | money | no | What the shop pays for old gold — normally lower. |
 | `source` | text | auto | one of: manual, feed · default 'manual' |
 | `branch_id` | → branch | no | Null means the rate applies to every branch. |
+| `retired_at` | timestamp | no | Removed from the rate list. Kept for history; never used for pricing. |
 
 **Must supply on insert:** `metal_id`, `rate_per_gram`
 
@@ -1711,6 +1713,7 @@ unique: order_number
 | `cancelled_at` | timestamp | no |  |
 | `cancel_reason` | text | no |  |
 | `sales_invoice_id` | → sales_invoice | no |  |
+| `external_reference` | text | no | Order number from the previous software, for imported orders. |
 
 **Must supply on insert:** `order_number`, `order_type`, `stage`, `branch_id`, `customer_id`, `order_date`, `expected_delivery_date`
 
@@ -2734,6 +2737,85 @@ unique: redemption_number
 | `notes` | text | no |  |
 
 **Must supply on insert:** `scheme_account_id`, `redemption_number`, `redeemed_on`, `branch_id`
+
+
+## Security vault & private entry
+
+### `private_gateway`
+
+The hidden admin entry on the 404 page: a private path and three ordered points on the artwork. One row per tenant, written only by the super admin.
+
+unique: 
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `enabled` | boolean | auto | default false |
+| `path` | text | auto | default '' · Exact, case-sensitive pathname. Never listed anywhere a business user can read it. |
+| `points` | json | auto | default '[]' · [{x,y}] ×3, normalised 0–1 over the 640×440 artwork. |
+| `revision` | integer | auto | default 0 · Bumped on every save. Grants issued under an older revision stop working. |
+| `updated_by_platform_user_id` | → platform_user | no |  |
+
+_Nothing is required beyond the automatic columns._
+
+---
+
+### `security_grant`
+
+Short-lived proof that someone unlocked the vault or passed the private entry. Only the sha256 of each token is kept.
+
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `kind` | text | **yes** | one of: vault_unlock, gateway_grant, gateway_access · vault_unlock: private figures visible. gateway_grant: one-use, 60 s, swapped for gateway_access. gateway_access: the welcome view, 5 min. |
+| `user_id` | → app_user | **yes** |  |
+| `branch_id` | → branch | no |  |
+| `token_hash` | text | **yes** | sha256 of the token. The token itself is never stored. |
+| `token_version` | integer | **yes** | The user’s token_version when issued. A password or role change bumps it and the grant dies. |
+| `revision` | integer | **yes** | The vault or gateway revision when issued. |
+| `expires_at` | timestamp | **yes** |  |
+| `consumed_at` | timestamp | no | One-use grants: set the moment it is used. |
+| `revoked_at` | timestamp | no |  |
+| `ip_address` | text | no |  |
+
+**Must supply on insert:** `kind`, `user_id`, `token_hash`, `token_version`, `revision`, `expires_at`
+
+---
+
+### `security_lockout`
+
+Wrong vault passcodes and wrong private-entry patterns, per person. Five in a row locks that person out for a while.
+
+unique: kind + user_id
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `kind` | text | **yes** | one of: vault, gateway |
+| `user_id` | → app_user | **yes** |  |
+| `failed_count` | integer | auto | default 0 |
+| `locked_until` | timestamp | no |  |
+| `last_failed_at` | timestamp | no |  |
+
+**Must supply on insert:** `kind`, `user_id`
+
+---
+
+### `security_vault`
+
+The private-figures vault of one business: on/off, its passcode and who may unlock it. One row per tenant, written only by the super admin.
+
+unique: 
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `enabled` | boolean | auto | default false · Off = nobody can unlock; private figures stay hidden. |
+| `passcode_hash` | text | no | scrypt salt:hash. Never returned by any endpoint. |
+| `passcode_changed_at` | timestamp | no |  |
+| `unlock_minutes` | integer | auto | default 15 · How long one unlock lasts before it locks again by itself. |
+| `allowed_role_types` | json | auto | default '["owner"]' · Role types that may unlock: owner, admin, staff. |
+| `revision` | integer | auto | default 0 · Bumped on every save. Unlocks granted under an older revision stop working. |
+| `updated_by_platform_user_id` | → platform_user | no |  |
+
+_Nothing is required beyond the automatic columns._
 
 
 ## Settings & Theme Studio

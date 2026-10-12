@@ -9,6 +9,7 @@ import { pool, closePool } from '../src/core/db/pool.js';
 import { asPlatform } from '../src/core/db/client.js';
 import { syncSchema } from '../src/core/db/schema/sync.js';
 import { provisionTenant } from '../src/modules/tenancy/provisioning.service.js';
+import { assertSafeTestDatabase } from './safety.js';
 
 async function ensureTestFixtures(): Promise<void> {
   const hasTenant = await asPlatform(async (tx) => {
@@ -42,6 +43,7 @@ async function ensureTestFixtures(): Promise<void> {
 }
 
 export async function setup(): Promise<void> {
+  assertSafeTestDatabase();
   await syncSchema(pool, 'force');
   await ensureTestFixtures();
 }

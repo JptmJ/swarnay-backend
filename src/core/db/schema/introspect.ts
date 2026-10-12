@@ -47,7 +47,7 @@ export function normaliseDefault(raw: string | null): string | null {
   return value;
 }
 
-export async function introspect(client: PoolClient, schema = 'public'): Promise<LiveSchema> {
+export async function introspect(client: PoolClient, schema: string): Promise<LiveSchema> {
   const live: LiveSchema = new Map();
 
   const tableRows = await client.query<{ table_name: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>(

@@ -6,10 +6,12 @@
 import '../bootstrap.js';
 import { asPlatform, asTenant } from '../core/db/client.js';
 import { closePool } from '../core/db/pool.js';
+import { assertMayChange } from '../core/db/protected.js';
 import { newId } from '../core/util/id.js';
 import { seedSystemRoles } from '../modules/identity/role-seed.js';
 
 async function main(): Promise<void> {
+  assertMayChange('backfill roles on every tenant');
   const tenants = await asPlatform((tx) => tx.query<{ id: string; code: string }>(
     `select id, code from tenant where deleted_at is null order by created_at`,
   ));

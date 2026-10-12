@@ -28,3 +28,25 @@ export function limitFailures(options: { limit: number; windowMs: number; key: (
     next();
   };
 }
+
+/**
+ * Caps every request for a key, successes included — for endpoints whose
+ * refusals look like successes (a silent `null`), which `limitFailures` would
+ * never count.
+ */
+export function limitRequests(options: { limit: number; windowMs: number; key: (req: Request) => string; message: string }): RequestHandler {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  return (req, _res, next) => {
+    const key = options.key(req);
+    const now = Date.now();
+    const hit = hits.get(key);
+    if (hit && hit.resetAt > now) {
+      if (hit.count >= options.limit) return next(new AppError(options.message, 429, 'rate_limited'));
+      hit.count += 1;
+    } else {
+      if (hits.size >= 10_000) hits.clear();
+      hits.set(key, { count: 1, resetAt: now + options.windowMs });
+    }
+    next();
+  };
+}

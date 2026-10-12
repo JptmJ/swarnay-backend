@@ -1,8 +1,9 @@
 import './bootstrap.js';
 import { createApp } from './app.js';
-import { env, syncMode } from './core/config/env.js';
+import { dbTarget, env, syncMode } from './core/config/env.js';
 import { checkConnection, closePool, pool, startDbHeartbeat, stopDbHeartbeat } from './core/db/pool.js';
 import { syncSchema } from './core/db/schema/sync.js';
+import { warnAboutOtherCopies } from './core/db/schema/copies.js';
 import { buildStamp } from './core/util/version.js';
 import { allTables } from './core/db/schema/registry.js';
 import { logger } from './core/util/logger.js';
@@ -18,11 +19,12 @@ import { tick as reportsTick } from './modules/reports/reports.service.js';
  */
 async function main(): Promise<void> {
   logger.info(
-    { env: env.NODE_ENV, tables: allTables().length, schemaSync: syncMode },
+    { env: env.NODE_ENV, dbTarget: dbTarget ?? 'DATABASE_URL', tables: allTables().length, schemaSync: syncMode },
     'Starting Swarnay backend',
   );
 
   await checkConnection();
+  await warnAboutOtherCopies(pool);
   await syncSchema(pool, syncMode, buildStamp());
 
   const app = createApp();

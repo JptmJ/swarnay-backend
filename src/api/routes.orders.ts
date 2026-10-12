@@ -47,29 +47,11 @@ const lineSchema = z.object({
   itemId: uuid.nullish(), pieceId: uuid.nullish().describe('A tagged piece promised off the shelf; it is held for this order.'),
   purityId: uuid.nullish(), categoryId: uuid.nullish(),
   quantity: decimal.optional(), grossWeight: weight.optional(), stoneWeight: weight.optional(),
-  makingBasis: z.enum(['per_gram', 'percent', 'flat']).optional(), makingRate: decimal.optional(),
-  wastagePercent: decimal.optional(), stoneAmount: money.optional(), discountAmount: money.optional(),
-  hsnCode: z.string().max(10).optional(), specialInstructions: z.string().max(1000).optional(),
-  estimatedAmount: money.optional().describe('For work that cannot be priced yet: what the customer was quoted.'),
-});
-
-const custodySchema = z.object({
-  description: z.string().trim().min(1).max(200),
-  tokenNumber: z.string().trim().max(40).optional().describe('What is written on the paper tag. Taken from the order number if left out.'),
-  metalId: uuid.optional(), purityId: uuid.optional(), testedPurityPercent: decimal.optional(),
-  grossWeight: weight.optional(), stoneWeight: weight.optional(), declaredValue: money.optional(),
-  conditionNotes: z.string().max(1000).optional(), whereKept: z.string().max(100).optional(),
-});
-
-/* ---------------------------------------------------------------- settings */
-
-defineRoute({
-  method: 'get', path: `${O}/settings`, module: 'orders', summary: 'Orders settings in force',
-  description: 'How orders are priced (the rate held at booking, for how long, and whether staff may switch it), the smallest advance, how a repair is billed, what happens to metal lost above the ghat, and the delivery warning.',
-  permission: 'orders.view',
-  responses: [{ status: 200, description: 'The settings.', schema: record }],
-  changelog: built('Orders settings for the desk and the board.'),
-  handler: async () => transaction((tx) => orderSettings(tx)),
+  ratePerGram: money.optional().describe('Falls back to the order’s locked rate, then today’s sale rate in Masters → Rates for the line’s purity.'),
+  makingBasis: z.enum(['per_gram', 'percent', 'flat']).optional(),
+  makingRate: decimal.optional(), wastagePercent: decimal.optional(),
+  stoneAmount: money.optional(), discountAmount: money.optional(), gstRate: decimal.optional(),
+  hsnCode: z.string().optional(), specialInstructions: z.string().optional(),
 });
 
 defineRoute({
@@ -226,8 +208,14 @@ defineRoute({
     { status: 201, description: 'Taken, on the first step of its type.', schema: record },
     { status: 422, description: 'Advance above the order, a piece already promised, or a type rule.', schema: errorEnvelope },
   ],
-  changelog: built('Prices through the shared engine, holds pieces, posts the advance.'),
-  handler: async (req, res) => { res.status(201).json(await transaction((tx) => createOrder(tx, req.body))); },
+  changelog: [
+    ...seed,
+    { date: '2026-10-10', kind: 'changed', note: 'A line with a purity and no rate is priced at today’s sale rate from Masters → Rates instead of 0.' },
+  ],
+  handler: async (req, res) => {
+    const order = await transaction((tx) => createOrder(tx, req.body));
+    res.status(201).json(order);
+  },
 });
 
 defineRoute({

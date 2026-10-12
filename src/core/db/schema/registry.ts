@@ -80,9 +80,16 @@ export function defineTable(def: TableDef): ResolvedTable {
   // Every tenant index now leads with tenant_id, so a bare (tenant_id) index is redundant unless nothing else exists.
   if (tenantScoped && indexes.length === 0) indexes.unshift({ columns: ['tenant_id'] });
 
+  // `unique: true` on a column is shorthand for a one-column unique constraint
+  // (tenant.code, platform_user.email). It used to be dropped on the floor, so
+  // the database never enforced it.
+  const columnUniques = Object.entries(def.columns)
+    .filter(([, column]) => column.unique)
+    .map(([name]) => ({ columns: [name] }));
+
   // Tenant-scoped uniques must include tenant_id, otherwise two tenants could
   // never both have an invoice numbered "INV-001".
-  const uniques = (def.uniques ?? []).map((u) =>
+  const uniques = [...(def.uniques ?? []), ...columnUniques].map((u) =>
     tenantScoped && !u.columns.includes('tenant_id')
       ? { ...u, columns: ['tenant_id', ...u.columns] }
       : u,

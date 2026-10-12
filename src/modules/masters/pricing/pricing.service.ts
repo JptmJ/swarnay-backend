@@ -113,7 +113,7 @@ export async function loadPricer(tx: Tx, reqs: PriceRequest[]): Promise<(req: Pr
               effective_from::text as effective_from,
               (effective_from at time zone (select timezone from tenant where id = $3))::date::text as effective_date
          from metal_rate
-        where metal_id = any($1::uuid[]) and effective_from <= now() and (branch_id = $2 or branch_id is null)
+        where metal_id = any($1::uuid[]) and effective_from <= now() and retired_at is null and (branch_id = $2 or branch_id is null)
         order by metal_id, purity_id, effective_from desc, branch_id nulls last`,
       [ids((r) => r.metalId), branchId, tx.context.tenantId]),
     tx.query<RuleRow>(

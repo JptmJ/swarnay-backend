@@ -105,7 +105,7 @@ export async function valueLines(tx: Tx, lines: OldGoldLineInput[], settings?: S
       `select id, code, metal_id, fineness_percent as fineness from purity where metal_id = any($1::uuid[]) and is_active`, [metalIds]),
     tx.query<RateRow>(
       `select distinct on (metal_id, purity_id) metal_id, purity_id, rate_per_gram, buying_rate_per_gram
-         from metal_rate where metal_id = any($1::uuid[]) and effective_from <= now() and (branch_id = $2 or branch_id is null)
+         from metal_rate where metal_id = any($1::uuid[]) and effective_from <= now() and retired_at is null and (branch_id = $2 or branch_id is null)
         order by metal_id, purity_id, effective_from desc, branch_id nulls last`, [metalIds, branchId]),
   ]);
   const metalName = (id: string) => metals.find((m) => m.id === id)?.name ?? 'this metal';
