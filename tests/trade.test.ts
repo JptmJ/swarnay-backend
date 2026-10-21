@@ -52,8 +52,18 @@ describe('Purchase & POS', { timeout: 300_000 }, () => {
       const s = await tx.one<{ id: string; tv: number }>(
         `insert into app_user (id, tenant_id, email, full_name, password_hash, is_active, must_change_password)
          values (gen_random_uuid(), $1, $2, 'Counter Sales', 'x', true, false) returning id, token_version as tv`, [tenantId, `sales.${run.toLowerCase()}@${SHOP}.in`]);
+      // Counter staff: a named staff role that may bill but not cancel or approve discounts, at the main branch.
+      const role = await tx.one<{ id: string }>(
+        `with found as (select id from role where tenant_id = $1 and code = 'counter_sales' and deleted_at is null),
+              made as (insert into role (id, tenant_id, code, name, role_type)
+                       select gen_random_uuid(), $1, 'counter_sales', 'Counter Sales', 'staff' where not exists (select 1 from found)
+                       returning id)
+         select id from found union all select id from made`, [tenantId]);
+      await tx.query(`insert into role_permission (id, tenant_id, role_id, permission)
+                      select gen_random_uuid(), $1, $2, p from unnest(array['pos.view', 'pos.create']) p
+                      on conflict (tenant_id, role_id, permission) do nothing`, [tenantId, role.id]);
       await tx.query(`insert into user_role (id, tenant_id, user_id, role_id, branch_id)
-                      select gen_random_uuid(), $1, $2, id, null from role where tenant_id = $1 and code = 'sales'`, [tenantId, s.id]);
+                      values (gen_random_uuid(), $1, $2, $3, (select id from branch where tenant_id = $1 and code = 'MAIN'))`, [tenantId, s.id, role.id]);
       return { o, s };
     });
     main = users.o.branch;
