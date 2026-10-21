@@ -83,6 +83,22 @@ if (!parsed.success) {
   process.exit(1);
 }
 
+const databaseName = (() => {
+  try {
+    return decodeURIComponent(new URL(parsed.data.DATABASE_URL).pathname.replace(/^\//, ''));
+  } catch {
+    return null; // not a URL at all — node-pg reports that itself
+  }
+})();
+if (databaseName === '') {
+  console.error(
+    'DATABASE_URL has no database name at the end. Add it after the port:\n' +
+      '  …@aws-0-ap-south-1.pooler.supabase.com:5432/postgres   (Supabase)\n' +
+      '  …@35.153.24.32:5432/swarnay_erp                       (production)\n',
+  );
+  process.exit(1);
+}
+
 // .env.example is committed with <…> placeholders for the secrets. A server
 // started without filling them in must not run — least of all with a JWT secret
 // anyone can read on GitHub.
