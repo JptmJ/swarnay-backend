@@ -22,6 +22,7 @@
     "db:backfill-roles": "tsx src/cli/backfill-roles.ts",
     "db:backfill-masters": "tsx src/cli/backfill-masters.ts",
     "db:backfill-orders": "tsx src/cli/backfill-orders.ts",
+    "db:backfill-dashboard": "tsx src/cli/backfill-dashboard.ts",
     "routes:audit": "tsx src/cli/route-audit.ts",
     "db:migrate-role-types": "tsx src/cli/migrate-role-types.ts"
   },

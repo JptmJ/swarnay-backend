@@ -153,9 +153,9 @@ export const tenantThemeTable = defineTable({
 });
 
 /**
- * The owner cockpit layout. The frontend lets a user drag widgets around and
- * save; `role_code` rows are the defaults a user's "Reset role defaults"
- * button falls back to.
+ * A person's Dashboard layout. `role_code` rows are defaults the owner sets
+ * for a role ('*' for everyone); a person without a layout of their own gets
+ * their role's, then everyone's, then the built-in one.
  */
 export const dashboardLayoutTable = defineTable({
   name: 'dashboard_layout',
@@ -163,8 +163,10 @@ export const dashboardLayoutTable = defineTable({
   columns: {
     user_id: col.fk('app_user', { onDelete: 'cascade', comment: 'Null when this is a role default.' }),
     role_code: col.text({ comment: 'Set instead of user_id for a role-level default.' }),
-    /** Ordered widget keys with their visibility and section placement. */
+    /** Ordered widgets: [{ id, visible, order }]. Pinned reports are report_<ref>. */
     widgets: col.jsonb({ notNull: true, default: "'[]'::jsonb" }),
+    /** Per-layout choices such as the sales chart's range: { salesTrendDays }. */
+    widget_settings: col.jsonb({ notNull: true, default: "'{}'::jsonb" }),
     is_default: col.bool({ notNull: true, default: 'false' }),
   },
   uniques: [{ columns: ['user_id', 'role_code'], nullsNotDistinct: true }],

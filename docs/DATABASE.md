@@ -1,9 +1,9 @@
 # Swarnay — Database Reference
 
-Generated from the schema definitions on 2026-10-18.
+Generated from the schema definitions on 2026-10-21.
 **Do not edit by hand** — run `npm run gen:docs`.
 
-89 tables · 1841 columns.
+104 tables · 2233 columns.
 
 ---
 
@@ -47,8 +47,8 @@ A few conventions worth knowing:
 | masters | 13 | `branch`, `document_format`, `hsn_gst_rate`, `item`, `item_category`, `metal`, `metal_rate`, `party`, `payment_method`, `payment_method_branch`, `price_rule`, `purity`, `stock_location` |
 | Document numbering | 2 | `numbering_gap`, `numbering_series` |
 | Old Gold Exchange & Melt | 4 | `melt_batch`, `old_gold_intake`, `old_gold_item`, `old_gold_payout` |
-| Custom Orders & Karigar | 8 | `order_acknowledgement`, `order_attachment`, `order_communication`, `order_line`, `order_payment`, `order_pipeline`, `order_stage_event`, `retail_order` |
-| Platform Operator & SaaS Admin | 5 | `platform_audit_log`, `platform_refresh_token`, `platform_user`, `support_session`, `tenant_module` |
+| Custom Orders & Karigar | 10 | `karigar_job`, `order_acknowledgement`, `order_attachment`, `order_communication`, `order_custody_item`, `order_line`, `order_payment`, `order_pipeline`, `order_stage_event`, `retail_order` |
+| Platform Operator & SaaS Admin | 7 | `import_batch`, `import_row`, `platform_audit_log`, `platform_refresh_token`, `platform_user`, `support_session`, `tenant_module` |
 | Purchase | 8 | `goods_receipt`, `goods_receipt_line`, `purchase_invoice`, `purchase_order`, `purchase_order_line`, `purchase_return`, `purchase_return_line`, `supplier_settlement` |
 | Executive & Owner BI | 6 | `report_alert`, `report_inbox`, `report_pin`, `report_run`, `report_schedule`, `report_view` |
 | Sales / POS | 8 | `approval_memo`, `approval_memo_line`, `customer_receipt`, `sales_invoice`, `sales_invoice_line`, `sales_payment`, `sales_return`, `sales_return_line` |
@@ -335,6 +335,7 @@ unique: user_id + role_code
 | `user_id` | → app_user | no | Null when this is a role default. |
 | `role_code` | text | no | Set instead of user_id for a role-level default. |
 | `widgets` | json | auto | default '[]' |
+| `widget_settings` | json | auto | default '{}' |
 | `is_default` | boolean | auto | default false |
 
 _Nothing is required beyond the automatic columns._
@@ -1719,6 +1720,73 @@ unique: order_number
 
 
 ## Platform Operator & SaaS Admin
+
+### `import_batch`
+
+One file brought in from a previous system as one kind of record.
+
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `entity` | text | **yes** | What the rows become: customers, opening_pieces, party_balances… |
+| `title` | text | **yes** |  |
+| `status` | text | auto | one of: draft, validating, validated, importing, imported, partial, undoing, undone · default 'draft' |
+| `source_name` | text | no | The file name as uploaded. |
+| `source_format` | text | no | xlsx, csv, xml, json, dbf… |
+| `source_system` | text | no | The software it came from, as the operator named it. |
+| `sheet_name` | text | no |  |
+| `columns` | json | auto | default '[]' |
+| `mapping` | json | auto | default '{}' |
+| `value_map` | json | auto | default '{}' |
+| `options` | json | auto | default '{}' |
+| `row_count` | integer | auto | default 0 |
+| `valid_count` | integer | auto | default 0 |
+| `invalid_count` | integer | auto | default 0 |
+| `warning_count` | integer | auto | default 0 |
+| `skipped_count` | integer | auto | default 0 |
+| `imported_count` | integer | auto | default 0 |
+| `failed_count` | integer | auto | default 0 |
+| `undone_count` | integer | auto | default 0 |
+| `progress` | integer | auto | default 0 |
+| `validation` | json | no |  |
+| `result` | json | no |  |
+| `error` | text | no | Why the last job stopped, when it stopped on an error. |
+| `validated_at` | timestamp | no |  |
+| `started_at` | timestamp | no |  |
+| `finished_at` | timestamp | no |  |
+| `undone_at` | timestamp | no |  |
+| `operator_id` | uuid | **yes** |  |
+| `operator_name` | text | no |  |
+
+**Must supply on insert:** `entity`, `title`, `operator_id`
+
+---
+
+### `import_row`
+
+One row of an imported file, as it arrived, with what became of it.
+
+unique: batch_id + row_number
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `batch_id` | → import_batch | **yes** |  |
+| `row_number` | integer | **yes** | The row in the file, so messages point at something the shop can find. |
+| `data` | json | **yes** |  |
+| `status` | text | auto | one of: pending, valid, invalid, skipped, imported, failed, undone · default 'pending' |
+| `action` | text | no | one of: insert, update, skip |
+| `messages` | json | auto | default '[]' |
+| `label` | text | no |  |
+| `target_table` | text | no |  |
+| `target_id` | uuid | no |  |
+| `before` | json | no |  |
+| `after` | json | no |  |
+| `skip_requested` | boolean | auto | default false · The operator chose to leave this row out. |
+| `imported_at` | timestamp | no |  |
+
+**Must supply on insert:** `batch_id`, `row_number`, `data`
+
+---
 
 ### `platform_audit_log`
 

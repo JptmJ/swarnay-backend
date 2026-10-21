@@ -43,6 +43,7 @@ export const SOURCE_NUMBER_SQL = (v: string) => `case ${v}.source_type
     when 'girvi_accrual' then (select loan_number from girvi_loan where id = ${v}.source_id)
     when 'girvi_repayment' then (select receipt_number from girvi_repayment where id = ${v}.source_id)
     when 'journal_entry' then (select doc_number from journal_entry where id = ${v}.source_id)
+    when 'data_import' then (select 'Import: ' || title from import_batch where id = ${v}.source_id)
     else null end`;
 
 /** Which screen a voucher's document is opened on. */
@@ -52,7 +53,7 @@ export const SOURCE_MODULE: Record<string, string> = {
   stock_piece: 'stock', stock_count: 'stock', tagging_lot: 'tagging', old_gold_intake: 'oldgold', old_gold_payout: 'oldgold',
   melt_batch: 'oldgold', order_payment: 'orders', karigar_job: 'orders', karigar_job_receive: 'orders', karigar_payment: 'orders',
   scheme_installment: 'schemes', scheme_redemption: 'schemes', girvi_loan: 'girvi', girvi_accrual: 'girvi', girvi_repayment: 'girvi',
-  journal_entry: 'accounts',
+  journal_entry: 'accounts', data_import: 'accounts',
 };
 
 /* ------------------------------------------------------------ trial balance */

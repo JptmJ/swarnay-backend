@@ -133,6 +133,70 @@ export async function pipelineFor(tx: Tx, orderType: OrderType): Promise<StageSp
   return Array.isArray(stages) && stages.length > 0 ? stages : ORDER_PIPELINES[orderType];
 }
 
+/* ----------------------------------------------------------- master rates */
+
+/**
+ * Today's rate per actual gram for each purity, resolved the same way the
+ * counter's pricer does: a rate set for that exact purity wins; otherwise the
+ * metal's pure (100%) rate brought down by the purity's fineness. The pure
+ * rate is a base (no-purity) row, or the purest purity's rate scaled to 100%.
+ * Returned per gram of real metal, so metalAmount = net weight × this rate —
+ * which matches `priceLine` whether the shop values on net or fine weight.
+ *
+ * Used by bulk order import, where lines are priced without going through the
+ * full pricer (some rows have no item/HSN yet). Purities with no usable rate
+ * are simply left out of the map, so the caller can flag those rows.
+ */
+export async function masterRates(
+  tx: Tx,
+  purityIds: Array<string | null | undefined>,
+  branchId: string | null,
+): Promise<Map<string, Decimal>> {
+  const out = new Map<string, Decimal>();
+  const ids = [...new Set(purityIds.filter((v): v is string => Boolean(v)))];
+  if (!ids.length) return out;
+
+  const purities = await tx.query<{ id: string; metal_id: string; fineness: Decimal }>(
+    `select id, metal_id, fineness_percent::text as fineness from purity where id = any($1::uuid[])`,
+    [ids]);
+  if (!purities.length) return out;
+
+  const metalIds = [...new Set(purities.map((p) => p.metal_id))];
+  // Every purity of those metals, so a missing purity-specific rate can fall
+  // back to the purest purity's rate brought up to 100%.
+  const allPurities = await tx.query<{ id: string; metal_id: string; fineness: Decimal }>(
+    `select id, metal_id, fineness_percent::text as fineness from purity where metal_id = any($1::uuid[])`,
+    [metalIds]);
+  // Latest effective, non-retired rate per (metal, purity); a branch rate wins
+  // over the all-branch rate.
+  const rates = await tx.query<{ metal_id: string; purity_id: string | null; rate: Decimal }>(
+    `select distinct on (metal_id, purity_id) metal_id, purity_id, rate_per_gram::text as rate
+       from metal_rate
+      where metal_id = any($1::uuid[]) and effective_from <= now() and retired_at is null
+        and (branch_id = $2 or branch_id is null)
+      order by metal_id, purity_id, effective_from desc, branch_id nulls last`,
+    [metalIds, branchId]);
+
+  const purityById = new Map(allPurities.map((p) => [p.id, p]));
+  const pureRateOf = (metalId: string): Decimal | null => {
+    const base = rates.find((r) => r.metal_id === metalId && r.purity_id === null);
+    if (base) return base.rate;
+    const purest = rates
+      .filter((r) => r.metal_id === metalId && r.purity_id && purityById.has(r.purity_id))
+      .sort((a, b) => compare(purityById.get(b.purity_id!)!.fineness, purityById.get(a.purity_id!)!.fineness))[0];
+    if (!purest) return null;
+    return round(div(mul(purest.rate, '100'), purityById.get(purest.purity_id!)!.fineness), 2);
+  };
+
+  for (const p of purities) {
+    const own = rates.find((r) => r.metal_id === p.metal_id && r.purity_id === p.id);
+    if (own) { out.set(p.id, own.rate); continue; }
+    const pure = pureRateOf(p.metal_id);
+    if (pure) out.set(p.id, round(div(mul(pure, p.fineness), '100'), 2));
+  }
+  return out;
+}
+
 async function recordStage(
   tx: Tx, orderId: string, from: string | null, to: string,
   direction: 'forward' | 'backward' | 'same', note?: string, reason?: string,

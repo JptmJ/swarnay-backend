@@ -54,6 +54,16 @@ const lineSchema = z.object({
   hsnCode: z.string().optional(), specialInstructions: z.string().optional(),
 });
 
+const custodySchema = z.object({
+  description: z.string().trim().min(1).max(500),
+  tokenNumber: z.string().max(40).optional().describe('The shop’s token/tag on the held item.'),
+  metalId: uuid.nullish(), purityId: uuid.nullish(),
+  testedPurityPercent: decimal.optional().describe('Purity read on the touchstone/XRF, if tested.'),
+  grossWeight: weight.optional(), stoneWeight: weight.optional(),
+  declaredValue: money.optional().describe('Value agreed with the customer for the item held.'),
+  conditionNotes: z.string().max(2000).optional(), whereKept: z.string().max(200).optional(),
+});
+
 defineRoute({
   method: 'get', path: `${O}/pipelines`, module: 'orders', summary: 'The steps each order type walks',
   description: 'A repair genuinely has different steps from a wedding order. Read this rather than hardcoding them; a shop can set its own.',

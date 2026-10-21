@@ -890,6 +890,50 @@ export const CONFIG = {
     schema: z.coerce.number().int().min(7).max(730), default: 90, scope: 'tenant',
   }),
 
+  dashboardRefreshSeconds: defineConfig({
+    key: 'dashboard.refresh_seconds', group: 'dashboard', label: 'Refresh the figures every (seconds)',
+    description: 'The Dashboard fetches its figures again on its own this often while it is open. 0 turns it off.',
+    schema: z.coerce.number().int().min(0).max(3600), default: 300, scope: 'tenant',
+  }),
+  dashboardOrderDueDays: defineConfig({
+    key: 'dashboard.order_due_days', group: 'dashboard', label: 'Warn about orders due within (days)',
+    description: 'Orders promised within this many days are listed under Needs attention.',
+    schema: z.coerce.number().int().min(0).max(60), default: 2, scope: 'tenant',
+  }),
+  dashboardKarigarDays: defineConfig({
+    key: 'dashboard.karigar_overdue_days', group: 'dashboard', label: 'A karigar job is late after (days)',
+    description: 'Used when a job has no due-back date of its own.',
+    schema: z.coerce.number().int().min(1).max(365), default: 15, scope: 'tenant',
+  }),
+  dashboardLowStockPieces: defineConfig({
+    key: 'dashboard.low_stock_pieces', group: 'dashboard', label: 'Low stock below (pieces per category)',
+    description: 'A category that sold in the last 90 days and has fewer pieces than this in stock is flagged.',
+    schema: z.coerce.number().int().min(0).max(10000), default: 3, scope: 'tenant',
+  }),
+  dashboardUnpaidDays: defineConfig({
+    key: 'dashboard.unpaid_bill_days', group: 'dashboard', label: 'An unpaid bill needs a call after (days)',
+    description: 'Bills with money still owed for longer than this are flagged.',
+    schema: z.coerce.number().int().min(1).max(3650), default: 30, scope: 'tenant',
+  }),
+  dashboardAgeBuckets: defineConfig({
+    key: 'dashboard.age_buckets', group: 'dashboard', label: 'Stock age bands (days)',
+    description: 'Where the stock ageing chart splits, as rising day counts separated by commas, e.g. 30, 90, 180, 365.',
+    schema: z.string().trim().regex(/^\d{1,4}(\s*,\s*\d{1,4}){0,7}$/, 'Give day counts separated by commas, e.g. 30, 90, 180.')
+      .refine((v) => { const n = v.split(',').map((x) => Number(x.trim())); return n.every((x, i) => x > 0 && (i === 0 || x > n[i - 1]!)); },
+        'Each band must be longer than the one before.'),
+    default: '30, 90, 180, 365', scope: 'tenant',
+  }),
+  dashboardAlertsOff: defineConfig({
+    key: 'dashboard.alerts_off', group: 'dashboard', label: 'Warnings switched off',
+    description: 'Kinds of warning the Dashboard does not show.',
+    schema: z.array(z.string().max(40)).max(30), default: [] as string[], scope: 'tenant',
+  }),
+  dashboardWeightUnit: defineConfig({
+    key: 'dashboard.weight_unit', group: 'dashboard', label: 'Show weights in',
+    description: 'Grams, kilograms or tola (11.6638 g).',
+    schema: z.enum(['g', 'kg', 'tola']), default: 'g' as const, scope: 'tenant',
+  }),
+
   stockValuation: defineConfig({
     key: 'inventory.valuation_method',
     group: 'inventory',

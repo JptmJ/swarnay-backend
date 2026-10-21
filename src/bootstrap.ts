@@ -40,4 +40,7 @@ import './modules/girvi/girvi.schema.js';
 import './modules/reports/reports.schema.js';
 import './modules/karigar/karigar.schema.js';
 
+/* bringing a shop's data over from its old software */
+import './modules/migration/migration.schema.js';
+
 export { allTables } from './core/db/schema/registry.js';

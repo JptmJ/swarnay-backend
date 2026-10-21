@@ -2,7 +2,7 @@
   "info": {
     "name": "Swarnay API",
     "_postman_id": "swarnay-api-collection",
-    "description": "# Swarnay API\n\nGenerated from the running server on 2026-10-09.\n226 endpoints.\n\n## Start here\n\n1. Set `baseUrl` — it defaults to the deployed backend.\n2. **Super admin work:** run `Platform Operator → POST platform/auth/login`.\n   The token is saved automatically into `platformToken`.\n3. **Shop staff work:** run `Settings → POST auth/login` with a `tenantCode`.\n   That token is saved into `token`, and the branch into `branchId`.\n\nEvery other request picks the right token up by itself.\n\n## Why two logins\n\nA super admin has no tenant, so they sign in with just email and password.\nShop staff belong to one business, so they also send `tenantCode` — that is\nwhat tells the server which shop `rajesh@gmail.com` works at.\n\n## Variables\n\n- `baseUrl` — the server\n- `platformToken` / `token` — filled in by the two logins\n- `tenantId`, `branchId`, `id` — fill these in as you go\n- `today`, `nowIso` — set automatically before each request",
+    "description": "# Swarnay API\n\nGenerated from the running server on 2026-10-21.\n355 endpoints.\n\n## Start here\n\n1. Set `baseUrl` — it defaults to the deployed backend.\n2. **Super admin work:** run `Platform Operator → POST platform/auth/login`.\n   The token is saved automatically into `platformToken`.\n3. **Shop staff work:** run `Settings → POST auth/login` with a `tenantCode`.\n   That token is saved into `token`, and the branch into `branchId`.\n\nEvery other request picks the right token up by itself.\n\n## Why two logins\n\nA super admin has no tenant, so they sign in with just email and password.\nShop staff belong to one business, so they also send `tenantCode` — that is\nwhat tells the server which shop `rajesh@gmail.com` works at.\n\n## Variables\n\n- `baseUrl` — the server\n- `platformToken` / `token` — filled in by the two logins\n- `tenantId`, `branchId`, `id` — fill these in as you go\n- `today`, `nowIso` — set automatically before each request",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -353,6 +353,32 @@
               "query": []
             },
             "description": "For a count typed by mistake. The demo being made is finished — cutting it off would leave half a business to delete — and no further demo is started. Demos already made stay; delete them from their tenant pages if they are not wanted. Stopping a finished job changes nothing.\n\n**Permission:** `platform.tenants.create`\n**Auth:** super admin token\n\n**Responses**\n- `200` — The job, with `stopped: true`.\n- `404` — No such job, someone else’s, or more than an hour old."
+          },
+          "response": []
+        },
+        {
+          "name": "GET platform/import-kinds",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/import-kinds",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "import-kinds"
+              ],
+              "query": []
+            },
+            "description": "Each kind lists its fields (key, label, type, required, the closed options of a list, what a lookup field names), the options a batch can take with their defaults, and whether importing it posts to the books. The console builds its picker, matching screen and \"Download sample\" files from this. Kinds are in the order a shop is best brought over in: masters, stock, balances, running accounts.\n\n**Permission:** `platform.tenants.view`\n**Auth:** super admin token\n\n**Responses**\n- `200` — The kinds."
           },
           "response": []
         },
@@ -832,6 +858,529 @@
                 }
               }
             }
+          },
+          "response": []
+        },
+        {
+          "name": "GET platform/tenants/:id/import-choices",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/import-choices?",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "import-choices"
+              ],
+              "query": [
+                {
+                  "key": "kind",
+                  "value": "metal",
+                  "disabled": false,
+                  "description": ""
+                },
+                {
+                  "key": "search",
+                  "value": "text",
+                  "disabled": true,
+                  "description": ""
+                }
+              ]
+            },
+            "description": "For the value panel: which purity \"22CT\" is, which ledger \"Cash A/c\" is, which customer a name means. Short lists come whole; customers, items and karigars are searched (`search`) and capped at 200.\n\n**Permission:** `platform.tenants.view`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Choices."
+          },
+          "response": []
+        },
+        {
+          "name": "GET platform/tenants/:id/imports",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports"
+              ],
+              "query": [
+                {
+                  "key": "entity",
+                  "value": "categories",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "disabled": true,
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Newest first, with counts. `progress` says, kind by kind, how many records have been brought over (undone imports not counted) — the console’s checklist.\n\n**Permission:** `platform.tenants.view`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Imports.\n- `404` — No such business."
+          },
+          "response": []
+        },
+        {
+          "name": "POST platform/tenants/:id/imports",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports"
+              ],
+              "query": []
+            },
+            "description": "Returns the batch with `mapping` already suggested from the headings (Customer Name, Mob No., Gr Wt, Tunch… are recognised), ready for the rows. Headings must be present and different from each other.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `201` — Created, with suggested matching.\n- `400` — Unknown kind, missing or repeated headings, or a bad option.\n- `404` — No such business.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entity\": \"categories\",\n  \"title\": \"text\",\n  \"sourceName\": \"Example name\",\n  \"sourceFormat\": \"text\",\n  \"sourceSystem\": \"text\",\n  \"sheetName\": \"Example name\",\n  \"columns\": [\n    \"text\"\n  ],\n  \"options\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE platform/tenants/:id/imports/:batchId",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}"
+              ],
+              "query": []
+            },
+            "description": "For a file staged by mistake. An import with rows brought in is undone instead, which keeps its record.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `204` — Deleted.\n- `422` — `import_locked`: rows were imported — undo it instead."
+          },
+          "response": []
+        },
+        {
+          "name": "GET platform/tenants/:id/imports/:batchId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}"
+              ],
+              "query": []
+            },
+            "description": "Poll this while a job runs (`running`). `statusCounts` counts rows by status; `sample` is the first five rows as they arrived, for the matching screen.\n\n**Permission:** `platform.tenants.view`\n**Auth:** super admin token\n\n**Responses**\n- `200` — The batch.\n- `404` — No such business or import."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH platform/tenants/:id/imports/:batchId",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}"
+              ],
+              "query": []
+            },
+            "description": "`mapping` replaces the whole matching: field → { column } or { constant }, with `unit` for weights and `format` for dates. `valueMap` is field → { value as written in the file → what it means here } — a record id from GET …/import-choices for a lookup field, or the option’s value for a list. Changing any of these sends the batch back to draft: check it again before importing. Once rows are imported they are fixed (422 `import_locked`).\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Updated.\n- `400` — A field, column, unit or option that does not exist.\n- `422` — `import_locked` once rows are imported; `import_busy` while a job runs.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"text\",\n  \"sourceSystem\": \"text\",\n  \"mapping\": {},\n  \"valueMap\": {},\n  \"options\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST platform/tenants/:id/imports/:batchId/import",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}",
+                "import"
+              ],
+              "query": []
+            },
+            "description": "Imports every row the check passed, in chunks; each row is checked once more as it goes in. Masters are added or updated, stock is tagged, balances and running accounts are posted to the books dated the cut-over day. Rows with errors are only left out when `leaveOutInvalid` says so. Runs in the background: answers 202, poll the batch. Calling it again on an import that stopped or was cut short carries on from where it got to.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `202` — Importing.\n- `422` — `import_not_ready` (check first), `import_has_errors` (fix or leave out), `import_empty`, `import_busy`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leaveOutInvalid\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET platform/tenants/:id/imports/:batchId/rows",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}/rows",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}",
+                "rows"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "text",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "level",
+                  "value": "warning",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "search",
+                  "value": "text",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "disabled": true,
+                  "description": ""
+                }
+              ]
+            },
+            "description": "`status`: one or more of pending, valid, invalid, skipped, imported, failed, undone, comma-separated. `level=warning` keeps rows with a warning. `search` looks in the cells, the label and the messages.\n\n**Permission:** `platform.tenants.view`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Rows in file order."
+          },
+          "response": []
+        },
+        {
+          "name": "POST platform/tenants/:id/imports/:batchId/rows",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}/rows",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}",
+                "rows"
+              ],
+              "query": []
+            },
+            "description": "Up to 1000 rows a call, each an object keyed by the file’s headings. `firstRow` is the file row of rows[0], so every message points at a row the shop can find. Sending a range again replaces it, so a retried call never doubles rows. Only before the import starts.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Stored.\n- `422` — `import_locked` once the import has started; `import_too_large` past 200,000 rows.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rows\": [\n    {}\n  ],\n  \"firstRow\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH platform/tenants/:id/imports/:batchId/rows/:rowNumber",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}/rows/{{rowNumber}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}",
+                "rows",
+                "{{rowNumber}}"
+              ],
+              "query": []
+            },
+            "description": "`data` holds only the cells to change, by heading. `skip: true` leaves the row out of the import. The file needs checking again afterwards.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `200` — The row, waiting to be checked.\n- `422` — `row_imported`: the row is in already.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {},\n  \"skip\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST platform/tenants/:id/imports/:batchId/stop",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}",
+                "stop"
+              ],
+              "query": []
+            },
+            "description": "What has gone in stays. The rest stays waiting: import again to carry on, or undo what went in.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `200` — Stopping.\n- `422` — `import_not_running`."
+          },
+          "response": []
+        },
+        {
+          "name": "POST platform/tenants/:id/imports/:batchId/undo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}/undo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}",
+                "undo"
+              ],
+              "query": []
+            },
+            "description": "Masters the import added are removed unless something has used them since (they stay, with the reason); masters it changed get their old values back, except fields changed again since. Stock, balances, scheme members and loans come out together or not at all: every opening voucher is reversed on its own date, pieces are written off with their tag numbers freed, scheme accounts and loans are cancelled with their numbers freed. Refused with 422 `import_in_use` when that would undo something that happened since (a piece sold, a collection taken, a loan repaid).\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `202` — Undoing.\n- `422` — `import_not_imported`, `import_in_use`, `import_busy`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Reason for the change\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST platform/tenants/:id/imports/:batchId/validate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/platform/tenants/{{id}}/imports/{{batchId}}/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "platform",
+                "tenants",
+                "{{id}}",
+                "imports",
+                "{{batchId}}",
+                "validate"
+              ],
+              "query": []
+            },
+            "description": "Reads every row through the matching against the shop as it is now: what each would do (add, update, leave), what is wrong, which values could not be placed (`validation.unknown`), what would be created on the way (`validation.willCreate`) and totals to compare with the old software (`validation.totals`). Runs in the background: answers 202, poll the batch.\n\n**Permission:** `platform.tenants.update`\n**Auth:** super admin token\n\n**Responses**\n- `202` — Checking.\n- `422` — `import_busy`, `import_empty` or `import_locked`."
           },
           "response": []
         },
@@ -1810,6 +2359,187 @@
       "description": "Owner cockpit with configurable widgets, alerts and live business health.",
       "item": [
         {
+          "name": "GET dashboard/activity",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/activity",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "activity"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{today}}",
+                  "disabled": true,
+                  "description": "The day to show; today in the shop’s time zone when omitted."
+                },
+                {
+                  "key": "branchId",
+                  "value": "{{branchId}}",
+                  "disabled": true,
+                  "description": "One branch; omit for every branch."
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "disabled": true,
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Every document posted that day (bills, purchases, old gold, savings, girvi, vouchers…), orders taken and master changes, newest first, limited to the modules you may see.\n\n**Permission:** `dashboard.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — The day’s activity."
+          },
+          "response": []
+        },
+        {
+          "name": "GET dashboard/alerts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "alerts"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{today}}",
+                  "disabled": true,
+                  "description": "The day to show; today in the shop’s time zone when omitted."
+                },
+                {
+                  "key": "branchId",
+                  "value": "{{branchId}}",
+                  "disabled": true,
+                  "description": "One branch; omit for every branch."
+                }
+              ]
+            },
+            "description": "Rates not entered, late and due orders, karigar jobs out too long, categories running low, old unpaid bills, overdue girvi, missed savings, pieces without HUID, unprinted tags, open cash days, entries awaiting approval and unread report alerts. Limits come from the dashboard settings; kinds can be switched off.\n\n**Permission:** `dashboard.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Warnings, the most serious first."
+          },
+          "response": []
+        },
+        {
+          "name": "GET dashboard/charts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/charts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "charts"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{today}}",
+                  "disabled": true,
+                  "description": "The day to show; today in the shop’s time zone when omitted."
+                },
+                {
+                  "key": "branchId",
+                  "value": "{{branchId}}",
+                  "disabled": true,
+                  "description": "One branch; omit for every branch."
+                },
+                {
+                  "key": "days",
+                  "value": "30",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "widgets",
+                  "value": "text",
+                  "disabled": true,
+                  "description": "Comma-separated widget ids to compute; omit for every widget you may see."
+                }
+              ]
+            },
+            "description": "Sales by day, by category and by payment mode over the last 7, 30 or 90 days; customers by city; stock by age.\n\n**Permission:** `dashboard.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Each chart’s points."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE dashboard/layout",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/layout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "layout"
+              ],
+              "query": []
+            },
+            "description": "Go back to the default layout\n\n**Permission:** `dashboard.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — The layout now in use."
+          },
+          "response": []
+        },
+        {
           "name": "GET dashboard/layout",
           "request": {
             "method": "GET",
@@ -1836,7 +2566,7 @@
               ],
               "query": []
             },
-            "description": "Falls back to the role default when the user has not customised anything.\n\n**Permission:** `reports.owner.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Widget layout."
+            "description": "Your own layout, else your role’s default, else the default for everyone; null means the built-in one.\n\n**Permission:** `dashboard.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Layout, where it came from, pinned reports and rules."
           },
           "response": []
         },
@@ -1871,10 +2601,121 @@
               ],
               "query": []
             },
-            "description": "Save the widget layout\n\n**Permission:** `reports.owner.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Saved.",
+            "description": "Save my layout\n\n**Permission:** `dashboard.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Saved.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"widgets\": [\n    {\n      \"key\": \"text\",\n      \"visible\": true,\n      \"section\": \"overview\",\n      \"order\": 0\n    }\n  ]\n}",
+              "raw": "{\n  \"widgets\": [\n    {\n      \"id\": \"{{id}}\",\n      \"visible\": false,\n      \"order\": 1\n    }\n  ],\n  \"settings\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET dashboard/layout/defaults",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/layout/defaults",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "layout",
+                "defaults"
+              ],
+              "query": []
+            },
+            "description": "Roles and their default layouts\n\n**Permission:** `dashboard.layout.manage`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Every role, with whether it has a default. \"*\" is everyone."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE dashboard/layout/defaults/:roleCode",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/layout/defaults/{{roleCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "layout",
+                "defaults",
+                "{{roleCode}}"
+              ],
+              "query": []
+            },
+            "description": "Remove a role’s default layout\n\n**Permission:** `dashboard.layout.manage`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Roles and their defaults."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT dashboard/layout/defaults/:roleCode",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/layout/defaults/{{roleCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "layout",
+                "defaults",
+                "{{roleCode}}"
+              ],
+              "query": []
+            },
+            "description": "People of that role who never arranged their own Dashboard see this one. Use \"*\" for everyone.\n\n**Permission:** `dashboard.layout.manage`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Roles and their defaults.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"widgets\": [\n    {\n      \"id\": \"{{id}}\",\n      \"visible\": false,\n      \"order\": 1\n    }\n  ],\n  \"settings\": {}\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1911,14 +2752,26 @@
               ],
               "query": [
                 {
+                  "key": "date",
+                  "value": "{{today}}",
+                  "disabled": true,
+                  "description": "The day to show; today in the shop’s time zone when omitted."
+                },
+                {
                   "key": "branchId",
                   "value": "{{branchId}}",
                   "disabled": true,
-                  "description": ""
+                  "description": "One branch; omit for every branch."
+                },
+                {
+                  "key": "widgets",
+                  "value": "text",
+                  "disabled": true,
+                  "description": "Comma-separated widget ids to compute; omit for every widget you may see."
                 }
               ]
             },
-            "description": "One call returns every headline metric the dashboard shows. Computed live; cache it on the client for a minute rather than polling.\n\n**Permission:** `reports.owner.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Dashboard metrics."
+            "description": "Stock, today’s sales, customers, orders, old gold, savings, receivables, cash and bank, girvi and this month’s gross profit, each with the last days for a sparkline. Only figures you may see are returned.\n\n**Permission:** `dashboard.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — The figures, keyed by widget."
           },
           "response": []
         }
@@ -5251,7 +6104,7 @@
             "description": "One endpoint for all five types; `orderType` decides what is required. A corporate order needs the company and their PO; a repair needs what was taken in. Lines are priced by the same engine the counter uses. A line with no purity or weight yet is carried as an estimate. A piece promised off the shelf is held for this order and cannot be promised twice. An advance posts as it is taken.\n\n**Permission:** `orders.create`\n**Auth:** shop staff token\n\n**Responses**\n- `201` — Taken, on the first step of its type.\n- `422` — Advance above the order, a piece already promised, or a type rule.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"orderType\": \"booking\",\n  \"customerId\": \"{{customerId}}\",\n  \"orderDate\": \"{{today}}\",\n  \"expectedDeliveryDate\": \"{{today}}\",\n  \"salespersonId\": \"{{salespersonId}}\",\n  \"karigarId\": \"{{karigarId}}\",\n  \"rateLockType\": \"booking\",\n  \"lockedRatePerGram\": \"6500.00\",\n  \"lines\": [\n    {\n      \"lineMode\": \"booking\",\n      \"title\": \"text\",\n      \"designSpecification\": \"text\",\n      \"itemId\": \"{{itemId}}\",\n      \"pieceId\": \"{{pieceId}}\",\n      \"purityId\": \"{{purityId}}\",\n      \"categoryId\": \"{{categoryId}}\",\n      \"quantity\": \"text\",\n      \"grossWeight\": \"10.000\",\n      \"stoneWeight\": \"10.000\",\n      \"makingBasis\": \"per_gram\",\n      \"makingRate\": \"6500.00\"\n    }\n  ],\n  \"custodyItems\": [\n    {\n      \"description\": \"text\",\n      \"tokenNumber\": \"text\",\n      \"metalId\": \"{{metalId}}\",\n      \"purityId\": \"{{purityId}}\",\n      \"testedPurityPercent\": \"8\",\n      \"grossWeight\": \"10.000\",\n      \"stoneWeight\": \"10.000\",\n      \"declaredValue\": \"text\",\n      \"conditionNotes\": \"text\",\n      \"whereKept\": \"text\"\n    }\n  ],\n  \"advance\": {\n    \"paymentMethodId\": \"{{paymentMethodId}}\",\n    \"amount\": \"6500.00\",\n    \"reference\": \"text\"\n  },\n  \"notes\": \"text\"\n}",
+              "raw": "{\n  \"orderType\": \"booking\",\n  \"customerId\": \"{{customerId}}\",\n  \"orderDate\": \"{{today}}\",\n  \"expectedDeliveryDate\": \"{{today}}\",\n  \"salespersonId\": \"{{salespersonId}}\",\n  \"karigarId\": \"{{karigarId}}\",\n  \"rateLockType\": \"booking\",\n  \"lockedRatePerGram\": \"6500.00\",\n  \"lines\": [\n    {\n      \"lineMode\": \"booking\",\n      \"title\": \"text\",\n      \"designSpecification\": \"text\",\n      \"itemId\": \"{{itemId}}\",\n      \"pieceId\": \"{{pieceId}}\",\n      \"purityId\": \"{{purityId}}\",\n      \"categoryId\": \"{{categoryId}}\",\n      \"quantity\": \"text\",\n      \"grossWeight\": \"10.000\",\n      \"stoneWeight\": \"10.000\",\n      \"ratePerGram\": \"6500.00\",\n      \"makingBasis\": \"per_gram\"\n    }\n  ],\n  \"custodyItems\": [\n    {\n      \"description\": \"text\",\n      \"tokenNumber\": \"text\",\n      \"metalId\": \"{{metalId}}\",\n      \"purityId\": \"{{purityId}}\",\n      \"testedPurityPercent\": \"8\",\n      \"grossWeight\": \"10.000\",\n      \"stoneWeight\": \"10.000\",\n      \"declaredValue\": \"text\",\n      \"conditionNotes\": \"text\",\n      \"whereKept\": \"text\"\n    }\n  ],\n  \"advance\": {\n    \"paymentMethodId\": \"{{paymentMethodId}}\",\n    \"amount\": \"6500.00\",\n    \"reference\": \"text\"\n  },\n  \"notes\": \"text\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5326,7 +6179,7 @@
             "description": "The date, the karigar, the brief, the rate and the lines. Sending `lines` replaces all of them: the order is priced again and the holds move with it — a piece dropped is let go, a piece added is held. Changing the rate needs `orders.rate.override`. An order cannot be made worth less than what has already been taken for it.\n\n**Permission:** `orders.update`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Changed.\n- `422` — Delivered or cancelled, a piece already promised elsewhere, or worth less than what was taken.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"expectedDeliveryDate\": \"{{today}}\",\n  \"karigarId\": \"{{karigarId}}\",\n  \"notes\": \"text\",\n  \"rateLockType\": \"booking\",\n  \"lockedRatePerGram\": \"6500.00\",\n  \"lines\": [\n    {\n      \"lineMode\": \"booking\",\n      \"title\": \"text\",\n      \"designSpecification\": \"text\",\n      \"itemId\": \"{{itemId}}\",\n      \"pieceId\": \"{{pieceId}}\",\n      \"purityId\": \"{{purityId}}\",\n      \"categoryId\": \"{{categoryId}}\",\n      \"quantity\": \"text\",\n      \"grossWeight\": \"10.000\",\n      \"stoneWeight\": \"10.000\",\n      \"makingBasis\": \"per_gram\",\n      \"makingRate\": \"6500.00\"\n    }\n  ],\n  \"requirementDescription\": \"text\",\n  \"sizeSpecifications\": \"text\",\n  \"budgetMin\": \"text\",\n  \"budgetMax\": \"text\",\n  \"manufacturingRoute\": \"text\",\n  \"externalManufacturerId\": \"{{externalManufacturerId}}\"\n}",
+              "raw": "{\n  \"expectedDeliveryDate\": \"{{today}}\",\n  \"karigarId\": \"{{karigarId}}\",\n  \"notes\": \"text\",\n  \"rateLockType\": \"booking\",\n  \"lockedRatePerGram\": \"6500.00\",\n  \"lines\": [\n    {\n      \"lineMode\": \"booking\",\n      \"title\": \"text\",\n      \"designSpecification\": \"text\",\n      \"itemId\": \"{{itemId}}\",\n      \"pieceId\": \"{{pieceId}}\",\n      \"purityId\": \"{{purityId}}\",\n      \"categoryId\": \"{{categoryId}}\",\n      \"quantity\": \"text\",\n      \"grossWeight\": \"10.000\",\n      \"stoneWeight\": \"10.000\",\n      \"ratePerGram\": \"6500.00\",\n      \"makingBasis\": \"per_gram\"\n    }\n  ],\n  \"requirementDescription\": \"text\",\n  \"sizeSpecifications\": \"text\",\n  \"budgetMin\": \"text\",\n  \"budgetMax\": \"text\",\n  \"manufacturingRoute\": \"text\",\n  \"externalManufacturerId\": \"{{externalManufacturerId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5633,7 +6486,115 @@
                 }
               ]
             },
-            "description": "Active orders grouped into their stage columns, ready to render.\n\n**Permission:** `orders.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Board with orders per stage."
+            "description": "Live orders grouped into the step they are on, with what is overdue or due soon and how many jobs are still with a karigar.\n\n**Permission:** `orders.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Orders per step."
+          },
+          "response": []
+        },
+        {
+          "name": "GET orders/custody",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/custody",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "custody"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "received",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "held",
+                  "value": "true",
+                  "disabled": true,
+                  "description": "true = still with the shop (not yet given back)."
+                },
+                {
+                  "key": "search",
+                  "value": "text",
+                  "disabled": true,
+                  "description": "Token, description, order number, customer name or mobile."
+                },
+                {
+                  "key": "cursor",
+                  "value": "text",
+                  "disabled": true,
+                  "description": ""
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "disabled": true,
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Repairs and metal brought in for a new piece, across every order: the token on the paper tag, what it weighs, where it is kept and who it belongs to. Never stock — the shop does not own any of it.\n\n**Permission:** `orders.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Newest first."
+          },
+          "response": []
+        },
+        {
+          "name": "POST orders/custody/:id/return",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/custody/{{id}}/return",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "custody",
+                "{{id}}",
+                "return"
+              ],
+              "query": []
+            },
+            "description": "For a repair or metal the customer brought. Refused while the item is still with a karigar.\n\n**Permission:** `orders.update`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Given back.\n- `422` — Already returned, or still with the karigar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"returnedToName\": \"Example name\",\n  \"notes\": \"text\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         },
@@ -5682,6 +6643,52 @@
           "response": []
         },
         {
+          "name": "POST orders/payments/:id/cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Branch-Id",
+                "value": "{{branchId}}",
+                "description": "Optional — act at one branch."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/payments/{{id}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "payments",
+                "{{id}}",
+                "cancel"
+              ],
+              "query": []
+            },
+            "description": "Take back an advance entered by mistake\n\n**Permission:** `orders.update`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Cancelled; the money goes back out the way it came.\n- `422` — The order is billed, or the credit was already spent.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Reason for the change\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "GET orders/pipelines",
           "request": {
             "method": "GET",
@@ -5709,37 +6716,6 @@
               "query": []
             },
             "description": "A repair genuinely has different steps from a wedding order. Read this rather than hardcoding them; a shop can set its own.\n\n**Permission:** `orders.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — Steps per type."
-          },
-          "response": []
-        },
-        {
-          "name": "GET orders/settings",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              },
-              {
-                "key": "X-Branch-Id",
-                "value": "{{branchId}}",
-                "description": "Optional — act at one branch."
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/orders/settings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "orders",
-                "settings"
-              ],
-              "query": []
-            },
-            "description": "How orders are priced (the rate held at booking, for how long, and whether staff may switch it), the smallest advance, how a repair is billed, what happens to metal lost above the ghat, and the delivery warning.\n\n**Permission:** `orders.view`\n**Auth:** shop staff token\n\n**Responses**\n- `200` — The settings."
           },
           "response": []
         }

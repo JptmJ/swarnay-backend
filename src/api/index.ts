@@ -20,10 +20,12 @@ import './routes.security.js';
 import './routes.stock.js';
 import './routes.accounts.js';
 import './routes.reports.js';
+import './routes.dashboard.js';
 import './routes.users.js';
 import './routes.pricing.js';
 
 /* Platform (super admin) routes — mounted on a separate router in app.ts. */
 import './routes.platform.js';
+import './routes.platform-import.js';
 
 export { buildRouter, allRoutes, changeFeed } from '../core/http/route-registry.js';

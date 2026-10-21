@@ -65,7 +65,7 @@ const GROUP_NAMES: Record<string, string> = {
   'stock.adjustment': 'Stock Adjustment', 'stock.opening': 'Opening Stock',
   'schemes.accounts': 'Scheme Accounts', 'schemes.collection': 'Installment Collection',
   'settings.config': 'Business Rules', 'settings.theme': 'Theme', 'settings.numbering': 'Numbering',
-  'settings.users': 'Staff', 'settings.roles': 'Roles', 'reports.owner': 'Owner Reports',
+  'settings.users': 'Staff', 'settings.roles': 'Roles', 'dashboard.layout': 'Dashboard layouts',
 };
 
 const titleise = (s: string) =>

@@ -21,6 +21,7 @@ import { asPlatform } from '../core/db/client.js';
 import { syncSchema } from '../core/db/schema/sync.js';
 import { isProduction } from '../core/config/env.js';
 import { createBranch, createTenant, createTenantUser } from '../modules/platform/provisioning.service.js';
+import { createDemoTenant, deleteTenantData, MAX_DEMOS_PER_JOB } from '../modules/platform/demo.service.js';
 import { createOrder } from '../modules/orders/orders.service.js';
 import { checkout } from '../modules/sales/sales.service.js';
 import { createInward } from '../modules/purchase/purchase.service.js';

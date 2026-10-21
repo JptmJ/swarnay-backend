@@ -60,7 +60,6 @@ const schema = z.object({
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   /** Seconds between checks for report alerts and schedules that are due. 0 turns the timer off. */
   REPORTS_TICK_SECONDS: z.coerce.number().int().min(0).default(300),
-  DATABASE_SCHEMA: z.string().default('public'),
   /** Seconds between database health checks in the log. 0 turns them off. */
   DB_HEARTBEAT_SECONDS: z.coerce.number().int().min(0).default(60),
 
@@ -83,6 +82,22 @@ const parsed = schema.safeParse(process.env);
 if (!parsed.success) {
   const issues = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
   console.error(`Configuration problem — the server cannot start:\n${issues}\n`);
+  process.exit(1);
+}
+
+const databaseName = (() => {
+  try {
+    return decodeURIComponent(new URL(parsed.data.DATABASE_URL).pathname.replace(/^\//, ''));
+  } catch {
+    return null; // not a URL at all — node-pg reports that itself
+  }
+})();
+if (databaseName === '') {
+  console.error(
+    'DATABASE_URL has no database name at the end. Add it after the port:\n' +
+      '  …@aws-0-ap-south-1.pooler.supabase.com:5432/postgres   (Supabase)\n' +
+      '  …@35.153.24.32:5432/swarnay_erp                       (production)\n',
+  );
   process.exit(1);
 }
 
