@@ -6,11 +6,11 @@
  *   3. compare it against what the modules declared
  *   4. apply what is safe, refuse what is not, write down what happened
  *
- * Modes (SCHEMA_SYNC_MODE):
- *   off    — do nothing
- *   verify — report drift and refuse to boot if there is any (use in production)
- *   safe   — apply additive changes automatically, block destructive ones (default for dev)
- *   force  — apply everything, including drops (never point this at production)
+ * There is no setting. Every start of the server, on a laptop or in
+ * production, runs it in `safe` mode; `npm run db:migrate` runs it on demand.
+ *   safe   — apply everything that adds; list what would delete and leave it
+ *   force  — apply everything, including drops (`npm run db:migrate -- --force`)
+ *   verify — compare only, change nothing (`--dry-run`)
  */
 import type { Pool, PoolClient } from 'pg';
 import type { SchemaChange } from './types.js';
@@ -22,7 +22,6 @@ import { buildStamp } from '../../util/version.js';
 import { APP_SCHEMA, SET_SEARCH_PATH } from '../search-path.js';
 import { createIndexSql, indexName, quoteIdent } from './sql.js';
 import { ensureExtensions, qualifiedOpclass } from './extensions.js';
-import { assertMayChange } from '../protected.js';
 
 export type SyncMode = 'off' | 'verify' | 'safe' | 'force';
 
@@ -62,14 +61,7 @@ function isAllowed(change: SchemaChange, mode: SyncMode): boolean {
 }
 
 export interface SyncOptions {
-  /**
-   * Work that must happen in the same transaction, after the lock and before
-   * the comparison — db:migrate moves or removes other copies of the tables
-   * here, so a failure anywhere leaves the database exactly as it was. Returns
-   * one line per thing done, for the log and the change log.
-   */
-  prepare?: (client: PoolClient) => Promise<string[]>;
-  /** Lines describing work done just before the sync (removing other copies), written to the change log with it. */
+  /** Lines describing work done just before the sync (removing old copies), written to the change log with it. */
   alreadyDone?: string[];
 }
 
@@ -85,7 +77,6 @@ export async function syncSchema(
     logger.warn('Schema sync is off — assuming the database already matches the code.');
     return { mode, applied: [], blocked: [], skipped: [], durationMs: 0 };
   }
-  if (mode !== 'verify') assertMayChange('change tables');
 
   const client = await pool.connect();
   try {
@@ -103,10 +94,7 @@ export async function syncSchema(
         // search_path to put it, a CREATE TABLE would fail — and in the past,
         // with another schema on the path, it quietly built a second copy there.
         await client.query(`create schema if not exists ${quoteIdent(APP_SCHEMA)}`);
-        const prepared = [
-          ...(options.prepare ? await options.prepare(client) : []),
-          ...(await ensureExtensions(client)),
-        ];
+        const prepared = await ensureExtensions(client);
         await client.query(CHANGE_LOG_DDL);
         for (const line of prepared) logger.info(`  applied  ${line}`);
         for (const line of [...(options.alreadyDone ?? []), ...prepared]) {

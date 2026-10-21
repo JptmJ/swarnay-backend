@@ -1,6 +1,6 @@
 # Swarnay — Database Reference
 
-Generated from the schema definitions on 2026-10-09.
+Generated from the schema definitions on 2026-10-18.
 **Do not edit by hand** — run `npm run gen:docs`.
 
 89 tables · 1841 columns.
@@ -1765,7 +1765,7 @@ unique: order_number
 
 Platform operators. One row today — the super admin, seeded from the CLI, never created through the API.
 
-**platform-level** (not tenant-scoped) · soft delete
+**platform-level** (not tenant-scoped) · soft delete · unique: email
 
 | Column | Type | Required | Notes |
 |---|---|---|---|
@@ -2927,7 +2927,7 @@ soft delete · unique: code
 
 One row per customer business. Everything else in the database points here.
 
-**platform-level** (not tenant-scoped) · soft delete
+**platform-level** (not tenant-scoped) · soft delete · unique: code
 
 | Column | Type | Required | Notes |
 |---|---|---|---|
