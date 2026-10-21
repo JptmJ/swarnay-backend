@@ -1,12 +1,10 @@
 /**
- * Other copies of the application's tables, and getting rid of them.
+ * Old copies of the application's tables in other schemas, and removing them.
  *
  * Every table lives in swarnay_schema. A copy anywhere else — `public` and
- * `app` from before the schema was fixed, an old `app_test` — is not part of
- * the application and the app never reads it. The server logs an error while
- * one exists. `npm run db:migrate -- --force` removes it; with
- * `--keep-data-from=<schema>` that copy's tables are first moved into
- * swarnay_schema, rows and all.
+ * `app` from before the schema was fixed — is not part of the application and
+ * the app never reads it. The server logs an error while one exists;
+ * `npm run db:migrate -- --force` removes it.
  */
 import type { Pool, PoolClient } from 'pg';
 import { logger } from '../../util/logger.js';
@@ -56,7 +54,7 @@ export async function warnAboutOtherCopies(db: Pool | PoolClient): Promise<Schem
       { schema: copy.schema, tables: copy.tables },
       `A second copy of the application's tables exists in schema "${copy.schema}" (${copy.tables} tables). ` +
         `The app only uses "${APP_SCHEMA}", so it never sees those rows. ` +
-        `Remove it with: npm run db:migrate -- --force   (or --keep-data-from=${copy.schema} to move its rows into ${APP_SCHEMA} first)`,
+        'Remove it (its rows are deleted) with: npm run db:migrate -- --force',
     );
   }
   return copies;
@@ -165,46 +163,12 @@ export async function removeCopy(pool: Pool, schema: string): Promise<string[]> 
 }
 
 /** Drops a schema the application no longer uses, keeping its extensions. */
-export async function dropSchema(pool: Pool, schema: string): Promise<string[]> {
+async function dropSchema(pool: Pool, schema: string): Promise<string[]> {
   return inTransaction(pool, async (client) => {
     const done = await moveExtensionsOut(client, schema);
     await client.query(`drop schema if exists ${q(schema)} cascade`);
     return [...done, `dropped schema ${schema}`];
   });
-}
-
-/**
- * Before --keep-data-from: swarnay_schema must hold no rows (a server may
- * already have created it, empty); its empty tables are dropped to make room.
- */
-export async function clearEmptyAppSchema(pool: Pool): Promise<string[]> {
-  const tables = await inTransaction(pool, async (client) => {
-    const rows = await rowsIn(client, APP_SCHEMA);
-    if (rows > 0) {
-      throw new Error(
-        `${APP_SCHEMA} already holds ${rows} row(s). --keep-data-from only fills an empty ${APP_SCHEMA}; ` +
-          'run without it to keep what is there and remove the other copies.',
-      );
-    }
-    return appTablesIn(client, APP_SCHEMA);
-  });
-  await dropTables(pool, APP_SCHEMA, tables);
-  return tables.length ? [`dropped ${tables.length} empty table(s) from ${APP_SCHEMA}`] : [];
-}
-
-/**
- * Makes `from`'s copy the application's by moving its tables into
- * swarnay_schema with their rows, indexes, keys and policies — metadata only,
- * nothing is copied. Runs inside the sync's transaction, so the move and the
- * changes that bring the moved tables up to date succeed or fail together.
- */
-export async function adoptCopy(client: PoolClient, from: string): Promise<string[]> {
-  if ((await appTablesIn(client, APP_SCHEMA)).length) {
-    throw new Error(`${APP_SCHEMA} still has tables — clearEmptyAppSchema() must run first.`);
-  }
-  const moving = await appTablesIn(client, from);
-  for (const table of moving) await client.query(`alter table ${q(from)}.${q(table)} set schema ${q(APP_SCHEMA)}`);
-  return [`moved ${moving.length} table(s) from ${from} into ${APP_SCHEMA}, rows and all`];
 }
 
 /**

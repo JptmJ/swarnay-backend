@@ -1,6 +1,6 @@
 import './bootstrap.js';
 import { createApp } from './app.js';
-import { dbTarget, env, syncMode } from './core/config/env.js';
+import { env } from './core/config/env.js';
 import { checkConnection, closePool, pool, startDbHeartbeat, stopDbHeartbeat } from './core/db/pool.js';
 import { syncSchema } from './core/db/schema/sync.js';
 import { warnAboutOtherCopies } from './core/db/schema/copies.js';
@@ -11,20 +11,23 @@ import { logger } from './core/util/logger.js';
 /**
  * Boot order matters:
  *   1. can we reach the database at all?
- *   2. bring its shape in line with the code
+ *   2. bring its shape in line with the code — the same on a laptop and on the
+ *      server, with no setting: everything that only ADDS (tables, columns,
+ *      indexes, keys) is applied; anything that would delete data is listed
+ *      and left for `npm run db:migrate -- --force`
  *   3. only then start accepting requests
  *
  * Nothing serves traffic against a schema it does not understand.
  */
 async function main(): Promise<void> {
   logger.info(
-    { env: env.NODE_ENV, dbTarget: dbTarget ?? 'DATABASE_URL', tables: allTables().length, schemaSync: syncMode },
+    { env: env.NODE_ENV, tables: allTables().length },
     'Starting Swarnay backend',
   );
 
   await checkConnection();
   await warnAboutOtherCopies(pool);
-  await syncSchema(pool, syncMode, buildStamp());
+  await syncSchema(pool, 'safe', buildStamp());
 
   const app = createApp();
   const server = app.listen(env.PORT, () => {

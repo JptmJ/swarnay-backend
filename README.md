@@ -11,36 +11,57 @@ See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for how it is built and why
 
 ```bash
 npm install
-cp .env.example .env      # fill in your database URL(s) and pick one with DB_TARGET
-npm run db:migrate        # create/update the tables
-npm run seed:superadmin -- --password='...'   # the one super admin
-npm run db:seed           # demo tenants you can log into
-npm run dev
+cp .env.example .env      # fill in DATABASE_URL's password and JWT_SECRET
+npm run dev               # connects, brings the tables up to date, serves on :4000
+npm run seed:superadmin -- --password='...'   # once: the super admin
 ```
 
-Then:
+### The database
 
-```bash
-curl -s localhost:4000/api/auth/login \
-  -H 'content-type: application/json' \
-  -d '{"tenantCode":"aarohi","identifier":"owner@aarohi.test","password":"demo12345"}'
-```
+**One database, `swarnay_erp`, one schema, `swarnay_schema`** — the same for
+your laptop and the server. Tables are declared in code (`*.schema.ts`); there
+are no migration files.
 
-### One database requirement
+- **Every start applies new changes.** When the server starts — `npm run dev`
+  on a laptop, the Docker container on the server — it compares the code with
+  the database and applies everything that *adds*: new tables, columns,
+  indexes, keys. There is no setting for this; it is the same everywhere.
+- **Deletions wait for you.** A change that would delete data (a column or
+  table the code no longer has) is listed in the log and left alone until you
+  run `npm run db:migrate -- --force`.
+- **`npm run db:migrate`** does the same as a start, on demand:
+  `-- --dry-run` lists the differences and changes nothing; `-- --force` also
+  applies the deletions, including removing old copies of the tables left in
+  other schemas (`public`, `app`).
 
 The app must **not** connect as a Postgres superuser — superusers bypass Row
-Level Security, which is what keeps tenants apart. Create a dedicated role:
+Level Security, which is what keeps tenants apart. A dedicated role needs only
+`CREATE` on the database (it creates `swarnay_schema` and the `pg_trgm`
+extension itself):
 
 ```sql
-CREATE ROLE swarnay_app LOGIN PASSWORD '...' NOSUPERUSER NOCREATEDB NOCREATEROLE;
--- CREATE on the database lets the app make its own schema, swarnay_schema,
--- and install pg_trgm; `npm run db:migrate` does both.
-GRANT ALL ON DATABASE your_db TO swarnay_app;
+CREATE ROLE swarnay_user LOGIN PASSWORD '...' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+GRANT ALL ON DATABASE swarnay_erp TO swarnay_user;
 ```
 
-Every table lives in `swarnay_schema` — see [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
-
 Postgres 15 or newer (uses `UNIQUE NULLS NOT DISTINCT`).
+
+### Deploying
+
+On the server, with Docker:
+
+```bash
+git pull
+cp .env.example .env      # first time only — fill in the real values
+docker compose up -d --build
+```
+
+Starting the container brings the tables up to date, so deploying new code is
+the only step. When a deploy removes a column or table, also run once:
+
+```bash
+docker compose exec backend npm run db:migrate -- --force
+```
 
 ---
 
@@ -48,13 +69,14 @@ Postgres 15 or newer (uses `UNIQUE NULLS NOT DISTINCT`).
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Sync the schema, then serve on :4000 with reload |
-| `npm run db:migrate` | Make the database match the code, in `swarnay_schema`. `-- --dry-run` only shows the changes; `-- --force` also applies blocked (data-deleting) ones, including removing other copies of the tables (`public`, `app`, …); `-- --force --keep-data-from=<schema>` first moves that copy's rows into `swarnay_schema` |
+| `npm run dev` | Bring the tables up to date, then serve on :4000 with reload |
+| `npm run start` | The same, from the compiled build (what production runs) |
+| `npm run db:migrate` | Bring the tables up to date now. `-- --dry-run` only lists the differences; `-- --force` also applies what deletes data |
 | `npm run seed:superadmin` | Create or reset the super admin (`-- --password=...`) |
-| `npm run db:seed` | Create demo tenants with branches, users and data (`-- --fresh` recreates them). Needs the super admin first |
-| `npm test` | Run the test suite — needs a `.env.test` pointing at a database used only by the tests |
+| `npm test` | Run the test suite — needs a `.env.test` with a database used only by the tests |
 | `npm run typecheck` | Type-check without emitting |
 | `npm run build` | Compile to `dist/` |
+| `npm run gen:docs` | Regenerate `docs/DATABASE.md` from the table definitions |
 
 ---
 
@@ -109,17 +131,16 @@ No migration files. The database is brought in line with the code on boot.
 
 ## Environment
 
-Which database a laptop uses, and how the ERP and super admin pick a backend, is
-explained in [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
+Two files: `.env` (the real values — never in git) and `.env.example` (its
+template). Laptop and server use the same variables.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DB_TARGET` | — | Developers: `local`, `supabase` or `deployed`. Picks `DATABASE_URL_<TARGET>` / `DATABASE_SSL_<TARGET>`. `deployed` is protected |
-| `DATABASE_URL` | — | Servers (production, CI) set this instead of `DB_TARGET`. One of the two is required |
+| `DATABASE_URL` | — | Required. The `swarnay_erp` database |
 | `DATABASE_SSL` | `false` | `true`, `false`, or `no-verify` for managed providers |
-| — | — | Every table lives in the schema `swarnay_schema`; it is not configurable (`DATABASE_SCHEMA` is refused) |
-| `SCHEMA_SYNC_MODE` | `safe` | `off` · `verify` · `safe` · `force` — use **`verify`** in production |
-| `JWT_SECRET` | — | Required, 16+ characters |
+| `JWT_SECRET` | — | Required, 16+ characters. Production refuses a `<…>` placeholder |
+| `NODE_ENV` | `development` | `production` on the server (docker-compose sets it) |
+| `CORS_ORIGINS` | — | Web apps that call the API from another origin |
 | `PORT` | `4000` | |
 
 ---
@@ -146,4 +167,5 @@ explained in [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
 Send `Authorization: Bearer <token>`, and optionally `X-Branch-Id` to act at a
 specific branch.
 
-npm run seed:superadmin -- --email=admin@swarnay.com --password='Admin@123456789' --name='SAdmin'
+
+alter extension pg_trgm set schema swarnay_schema; drop schema public;

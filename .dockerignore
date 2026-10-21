@@ -1,0 +1,7 @@
+# The image installs its own dependencies and builds its own dist/.
+node_modules
+dist
+.git
+# Passwords: passed in at run time (docker-compose env_file), never baked in.
+.env
+.env.test

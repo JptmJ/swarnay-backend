@@ -2,7 +2,7 @@ import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
 
 import pg from 'pg';
-import { dbTarget, env, isProtectedDatabase } from '../config/env.js';
+import { env } from '../config/env.js';
 import { APP_SCHEMA } from './search-path.js';
 import { logger } from '../util/logger.js';
 
@@ -67,7 +67,7 @@ export async function checkConnection(): Promise<void> {
   const target = databaseTarget();
   const started = Date.now();
   logger.info(
-    { dbTarget: dbTarget ?? 'DATABASE_URL', ...target, ssl: env.DATABASE_SSL, schema: APP_SCHEMA },
+    { ...target, ssl: env.DATABASE_SSL, schema: APP_SCHEMA },
     'Connecting to Postgres…',
   );
 
@@ -104,12 +104,6 @@ export async function checkConnection(): Promise<void> {
       logger.warn(
         { user: row.usr },
         `Connected as "${row.usr}", a role that bypasses Row Level Security — tenant isolation is NOT enforced by the database. Connect as a role with rolbypassrls = false (see CLAUDE.md → Security).`,
-      );
-    }
-    if (isProtectedDatabase) {
-      logger.warn(
-        `DB_TARGET=deployed — this is the LIVE shops' database. Everything you do in the app is real. ` +
-          `Schema sync is verify-only; table changes need npm run db:migrate -- --confirm=${row.db}`,
       );
     }
   } finally {
