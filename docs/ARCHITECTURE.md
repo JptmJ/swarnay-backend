@@ -148,17 +148,21 @@ it matters.
 becomes `['tenant_id', 'doc_number']`. Otherwise the first tenant to use
 `INV/2026-27/00001` would lock every other tenant out of that number forever.
 
-### The four modes
+### One behaviour, everywhere
 
-| `SCHEMA_SYNC_MODE` | Behaviour | Use it |
-|---|---|---|
-| `off` | Do nothing | Never, really |
-| `verify` | Report differences, refuse to boot | **Production** |
-| `safe` | Apply additive changes, block destructive ones | **Development** (default) |
-| `force` | Apply everything, including drops | A throwaway database only |
+There is no setting. Every start — `npm run dev` on a laptop, the container on
+the server — applies everything that adds and refuses everything that removes.
+The same engine runs on demand:
 
-`npm run db:migrate -- --dry-run` shows what *would* change without touching
-anything. Run it before every deploy.
+| Command | Behaviour |
+|---|---|
+| `npm run db:migrate -- --dry-run` | List the differences, change nothing |
+| `npm run db:migrate` | What every start does: apply everything that adds |
+| `npm run db:migrate -- --force` | Also apply what deletes data — the only way anything is dropped |
+
+One database (`swarnay_erp`), one schema (`swarnay_schema`): settings that
+picked a schema or a sync mode per machine are what once left the tables in
+two copies with the rows split between them, so they no longer exist.
 
 ### Actual output from this repository
 
@@ -473,18 +477,4 @@ Flagging these now because they are cheap to change today and expensive later.
 
 ## 12. Running it
 
-```bash
-npm install
-cp .env.example .env        # paste your connection string
-npm run db:migrate          # make the tables match the code
-npm run seed:superadmin -- --password='...'
-npm run db:seed             # demo tenants to log into
-npm run dev
-```
-
-| Command | What it does |
-|---|---|
-| `npm run db:migrate` | Lists the differences, then applies the safe ones. `-- --dry-run` touches nothing; `SHOW_SQL=true` prints the SQL. |
-| `npm run db:seed` | Creates demo tenants through the super admin's provisioning: branches, owner, an admin and a sales user per branch, and sample data. |
-| `npm run dev` | Syncs the schema, then serves on :4000. |
-| `npm test` | 30 tests — decimal maths, pricing, financial year, permissions, schema diff safety. |
+Setup, the database and deploying are in the [README](../README.md).

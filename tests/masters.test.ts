@@ -120,12 +120,12 @@ describe('Masters', { timeout: 60_000 }, () => {
   });
 
   it('customers: code, phone and state are filled in; lists carry spend and schemes', async () => {
-    const created = await call('/api/master/parties', { name: 'Kavya Iyer', is_customer: true, phone: '9876501234', gstin: '27AAACK1234C1Z5' });
+    const created = await call('/api/master/parties', { name: `Kavya Iyer ${run}`, is_customer: true, phone: '9876501234', gstin: '27AAACK1234C1Z5' });
     expect(created.status).toBe(201);
     expect(created.body.code).toMatch(/^C\d{6}$/);
     expect(created.body.phone).toBe('+919876501234');
     expect(created.body.state_code).toBe('27');
-    const found = (await call('/api/master/parties?is_customer=true&search=Kavya')).body.rows.find((r: { id: string }) => r.id === created.body.id);
+    const found = (await call(`/api/master/parties?is_customer=true&search=Kavya Iyer ${run}`)).body.rows.find((r: { id: string }) => r.id === created.body.id);
     expect(found).toMatchObject({ lifetime_spend: '0', active_schemes: 0 });
   });
 

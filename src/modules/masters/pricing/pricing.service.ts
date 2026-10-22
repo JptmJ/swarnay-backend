@@ -72,6 +72,8 @@ interface GstRow { id: string; hsn_code: string; component: string; rate: string
 
 const SETTINGS = {
   metalOn: CONFIG.metalValueBasis, makingOn: CONFIG.makingWeightBasis, treatment: CONFIG.makingGstTreatment, sac: CONFIG.separateMakingSac,
+  /* A composition dealer issues a bill of supply: no GST on anything. */
+  registration: CONFIG.accGstRegistration,
 };
 
 /** Most specific rule wins: item › category › purity › metal › branch, then priority, then the latest. */
@@ -232,7 +234,9 @@ export async function loadPricer(tx: Tx, reqs: PriceRequest[]): Promise<(req: Pr
       hallmarkAmount: req.hallmarkAmount,
       hallmark: req.hallmarkAmount === undefined && req.hallmarked ? toRule(pick('hallmark')) : null,
       discount: req.discount,
-      gstPercent: { metal: metalGst.rate, making: makingGst.rate, stone: stoneGst.rate, hallmark: hallmarkGst.rate },
+      gstPercent: settings.registration === 'composition'
+        ? { metal: '0', making: '0', stone: '0', hallmark: '0' }
+        : { metal: metalGst.rate, making: makingGst.rate, stone: stoneGst.rate, hallmark: hallmarkGst.rate },
       interState,
     });
 

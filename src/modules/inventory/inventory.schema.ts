@@ -72,6 +72,13 @@ export const stockPieceTable = defineTable({
     /** Null = still in the print queue. */
     label_printed_at: col.timestamptz(),
     label_print_count: col.int({ notNull: true, default: '0' }),
+    /**
+     * Booked on a customer's order. The piece stays in stock — the shop still
+     * owns it and it is still counted and valued — but it is promised, so it
+     * cannot be booked again and the counter will only bill it to that order.
+     */
+    reserved_order_id: col.fk('retail_order'),
+    reserved_at: col.timestamptz(),
   },
   uniques: [{ columns: ['tag_number'] }],
   indexes: [
@@ -81,6 +88,7 @@ export const stockPieceTable = defineTable({
     // One HUID per piece in stock. A melted or written-off piece releases its HUID.
     { name: 'ux_stock_piece_huid', columns: ['huid'], unique: true, where: "huid is not null and status not in ('melted', 'written_off')" },
     { columns: ['status', 'received_at'] },
+    { columns: ['reserved_order_id'], where: 'reserved_order_id is not null' },
     { columns: ['id'], name: 'ix_stock_piece_print_queue', where: 'label_printed_at is null' },
     // Search as you type on tag number and HUID. Global for the same reason as party's: RLS still filters.
     { name: 'gx_stock_piece_tag_trgm', columns: ['tag_number'], method: 'gin', opclass: 'gin_trgm_ops', global: true },

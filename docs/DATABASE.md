@@ -1,9 +1,9 @@
 # Swarnay — Database Reference
 
-Generated from the schema definitions on 2026-10-09.
+Generated from the schema definitions on 2026-10-21.
 **Do not edit by hand** — run `npm run gen:docs`.
 
-89 tables · 1841 columns.
+104 tables · 2233 columns.
 
 ---
 
@@ -37,7 +37,7 @@ A few conventions worth knowing:
 
 | Module | Tables | Names |
 |---|---|---|
-| Dual-Metal & Cash Ledgers | 4 | `account`, `ledger_entry`, `metal_ledger_entry`, `voucher` |
+| Dual-Metal & Cash Ledgers | 9 | `account`, `accounting_period`, `bank_statement_line`, `cash_day`, `journal_entry`, `journal_entry_line`, `ledger_entry`, `metal_ledger_entry`, `voucher` |
 | Core / shared | 1 | `config_value` |
 | Business Dashboard | 1 | `dashboard_layout` |
 | Mortgage / Girvi (Pawn Loans) | 4 | `girvi_accrual`, `girvi_collateral`, `girvi_loan`, `girvi_repayment` |
@@ -47,9 +47,10 @@ A few conventions worth knowing:
 | masters | 13 | `branch`, `document_format`, `hsn_gst_rate`, `item`, `item_category`, `metal`, `metal_rate`, `party`, `payment_method`, `payment_method_branch`, `price_rule`, `purity`, `stock_location` |
 | Document numbering | 2 | `numbering_gap`, `numbering_series` |
 | Old Gold Exchange & Melt | 4 | `melt_batch`, `old_gold_intake`, `old_gold_item`, `old_gold_payout` |
-| Custom Orders & Karigar | 8 | `order_acknowledgement`, `order_attachment`, `order_communication`, `order_line`, `order_payment`, `order_pipeline`, `order_stage_event`, `retail_order` |
-| Platform Operator & SaaS Admin | 5 | `platform_audit_log`, `platform_refresh_token`, `platform_user`, `support_session`, `tenant_module` |
+| Custom Orders & Karigar | 10 | `karigar_job`, `order_acknowledgement`, `order_attachment`, `order_communication`, `order_custody_item`, `order_line`, `order_payment`, `order_pipeline`, `order_stage_event`, `retail_order` |
+| Platform Operator & SaaS Admin | 7 | `import_batch`, `import_row`, `platform_audit_log`, `platform_refresh_token`, `platform_user`, `support_session`, `tenant_module` |
 | Purchase | 8 | `goods_receipt`, `goods_receipt_line`, `purchase_invoice`, `purchase_order`, `purchase_order_line`, `purchase_return`, `purchase_return_line`, `supplier_settlement` |
+| Executive & Owner BI | 6 | `report_alert`, `report_inbox`, `report_pin`, `report_run`, `report_schedule`, `report_view` |
 | Sales / POS | 8 | `approval_memo`, `approval_memo_line`, `customer_receipt`, `sales_invoice`, `sales_invoice_line`, `sales_payment`, `sales_return`, `sales_return_line` |
 | Swarna Nidhi (Chit Schemes) | 4 | `scheme_account`, `scheme_installment`, `scheme_plan`, `scheme_redemption` |
 | Security vault & private entry | 4 | `private_gateway`, `security_grant`, `security_lockout`, `security_vault` |
@@ -63,7 +64,7 @@ A few conventions worth knowing:
 
 ### `account`
 
-Chart of accounts (Module 9.2).
+Chart of accounts (Module 9.2): groups and the ledgers under them.
 
 soft delete · unique: code
 
@@ -73,13 +74,164 @@ soft delete · unique: code
 | `name` | text | **yes** |  |
 | `account_type` | text | **yes** | one of: asset, liability, equity, income, expense |
 | `parent_id` | → account | no |  |
+| `is_group` | boolean | auto | default false |
+| `is_direct` | boolean | auto | default false |
+| `ledger_kind` | text | auto | one of: cash, bank, general · default 'general' |
 | `is_control` | boolean | auto | default false |
 | `control_for` | text | no | one of: customer, supplier, karigar |
 | `tracks_metal` | boolean | auto | default false |
 | `is_system` | boolean | auto | default false |
 | `is_active` | boolean | auto | default true |
+| `description` | text | no |  |
+| `bank_name` | text | no |  |
+| `bank_account_number` | text | no |  |
+| `bank_ifsc` | text | no |  |
+| `tally_name` | text | no |  |
 
 **Must supply on insert:** `code`, `name`, `account_type`
+
+---
+
+### `accounting_period`
+
+A month or a financial year, and whether it is closed to new entries.
+
+unique: period_type + start_date
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `period_type` | text | **yes** | one of: month, year |
+| `start_date` | date | **yes** |  |
+| `end_date` | date | **yes** |  |
+| `status` | text | auto | one of: open, closed · default 'open' |
+| `closed_by` | → app_user | no |  |
+| `closed_at` | timestamp | no |  |
+| `reopened_by` | → app_user | no |  |
+| `reopened_at` | timestamp | no |  |
+| `reopen_reason` | text | no |  |
+| `summary` | json | no |  |
+| `voucher_id` | → voucher | no |  |
+
+**Must supply on insert:** `period_type`, `start_date`, `end_date`
+
+---
+
+### `bank_statement_line`
+
+A line off the bank statement, matched against the books.
+
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `account_id` | → account | **yes** |  |
+| `txn_date` | date | **yes** |  |
+| `description` | text | no |  |
+| `reference` | text | no |  |
+| `withdrawal` | money | auto | default 0 |
+| `deposit` | money | auto | default 0 |
+| `balance` | money | no |  |
+| `import_batch` | text | no |  |
+| `status` | text | auto | one of: unmatched, matched, ignored · default 'unmatched' |
+| `matched_entry_id` | → ledger_entry | no |  |
+| `matched_by` | → app_user | no |  |
+| `matched_at` | timestamp | no |  |
+| `note` | text | no |  |
+
+**Must supply on insert:** `account_id`, `txn_date`
+
+---
+
+### `cash_day`
+
+The cash drawer, counted when the shop opens and again when it shuts.
+
+unique: branch_id + business_date + account_id
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `branch_id` | → branch | **yes** |  |
+| `business_date` | date | **yes** |  |
+| `account_id` | → account | **yes** |  |
+| `status` | text | auto | one of: open, closed · default 'open' |
+| `opening_expected` | money | auto | default 0 |
+| `opening_counted` | money | auto | default 0 |
+| `opening_denominations` | json | no |  |
+| `opened_by` | → app_user | no |  |
+| `opened_at` | timestamp | no |  |
+| `closing_expected` | money | no |  |
+| `closing_counted` | money | no |  |
+| `closing_denominations` | json | no |  |
+| `difference` | money | no |  |
+| `difference_voucher_id` | → voucher | no |  |
+| `summary` | json | no | Money in and out by where it came from, frozen at close. |
+| `note` | text | no |  |
+| `closed_by` | → app_user | no |  |
+| `closed_at` | timestamp | no |  |
+| `reopened_by` | → app_user | no |  |
+| `reopened_at` | timestamp | no |  |
+| `reopen_reason` | text | no |  |
+
+**Must supply on insert:** `branch_id`, `business_date`, `account_id`
+
+---
+
+### `journal_entry`
+
+A voucher typed in Accounts: an expense, a payment, cash to bank, a journal, an opening balance.
+
+unique: doc_number
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `doc_number` | text | **yes** |  |
+| `doc_type` | text | **yes** | one of: payment, receipt, contra, journal, expense, opening, gst_settlement, year_close, cash_difference, revaluation |
+| `doc_date` | date | **yes** |  |
+| `branch_id` | → branch | **yes** |  |
+| `status` | text | auto | one of: pending_approval, posted, rejected, cancelled · default 'posted' |
+| `party_id` | → party | no |  |
+| `payee` | text | no |  |
+| `amount` | money | auto | default 0 |
+| `narration` | text | no |  |
+| `reference` | text | no |  |
+| `bill_number` | text | no |  |
+| `bill_date` | date | no |  |
+| `attachment_key` | text | no |  |
+| `source_type` | text | no |  |
+| `source_id` | uuid | no |  |
+| `approved_by` | → app_user | no |  |
+| `approved_at` | timestamp | no |  |
+| `reject_reason` | text | no |  |
+| `cancelled_by` | → app_user | no |  |
+| `cancelled_at` | timestamp | no |  |
+| `cancel_reason` | text | no |  |
+| `auto_reverse_on` | date | no |  |
+| `voucher_id` | → voucher | no |  |
+
+**Must supply on insert:** `doc_number`, `doc_type`, `doc_date`, `branch_id`
+
+---
+
+### `journal_entry_line`
+
+One side of a typed voucher. Money, grams, or both.
+
+unique: journal_entry_id + line_number
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `journal_entry_id` | → journal_entry | **yes** |  |
+| `line_number` | integer | **yes** |  |
+| `account_id` | → account | **yes** |  |
+| `party_id` | → party | no |  |
+| `debit` | money | auto | default 0 |
+| `credit` | money | auto | default 0 |
+| `metal_id` | → metal | no |  |
+| `purity_id` | → purity | no |  |
+| `weight_in` | weight (g) | auto | default 0 |
+| `weight_out` | weight (g) | auto | default 0 |
+| `narration` | text | no |  |
+
+**Must supply on insert:** `journal_entry_id`, `line_number`, `account_id`
 
 ---
 
@@ -100,6 +252,7 @@ The money side. Debits and credits in the base currency.
 | `narration` | text | no |  |
 | `against_type` | text | no |  |
 | `against_id` | uuid | no |  |
+| `bank_cleared_on` | date | no |  |
 
 **Must supply on insert:** `voucher_id`, `account_id`, `branch_id`, `entry_date`
 
@@ -138,7 +291,7 @@ unique: voucher_number
 | Column | Type | Required | Notes |
 |---|---|---|---|
 | `voucher_number` | text | **yes** |  |
-| `voucher_type` | text | **yes** | one of: opening, purchase, purchase_return, sale, sales_return, receipt, payment, journal, old_gold, scheme, mortgage, production |
+| `voucher_type` | text | **yes** | one of: opening, purchase, purchase_return, sale, sales_return, receipt, payment, journal, old_gold, scheme, mortgage, production, contra, expense, stock_journal, branch_transfer, gst_settlement, year_close, cash_difference, revaluation |
 | `voucher_date` | date | **yes** |  |
 | `branch_id` | → branch | **yes** |  |
 | `narration` | text | no |  |
@@ -146,6 +299,7 @@ unique: voucher_number
 | `source_id` | uuid | **yes** |  |
 | `is_reversed` | boolean | auto | default false |
 | `reverses_voucher_id` | → voucher | no |  |
+| `exported_at` | timestamp | no |  |
 
 **Must supply on insert:** `voucher_number`, `voucher_type`, `voucher_date`, `branch_id`, `source_type`, `source_id`
 
@@ -181,6 +335,7 @@ unique: user_id + role_code
 | `user_id` | → app_user | no | Null when this is a role default. |
 | `role_code` | text | no | Set instead of user_id for a role-level default. |
 | `widgets` | json | auto | default '[]' |
+| `widget_settings` | json | auto | default '{}' |
 | `is_default` | boolean | auto | default false |
 
 _Nothing is required beyond the automatic columns._
@@ -192,7 +347,7 @@ _Nothing is required beyond the automatic columns._
 
 One row per interest period. Written once, never recalculated.
 
-unique: girvi_loan_id + period_start
+unique: girvi_loan_id + period_start + kind
 
 | Column | Type | Required | Notes |
 |---|---|---|---|
@@ -203,6 +358,7 @@ unique: girvi_loan_id + period_start
 | `rate_monthly` | rate | **yes** |  |
 | `days` | integer | **yes** |  |
 | `interest_amount` | money | **yes** |  |
+| `kind` | text | auto | one of: interest, penal, storage · default 'interest' |
 | `is_waived` | boolean | auto | default false |
 | `waive_reason` | text | no |  |
 | `voucher_id` | → voucher | no |  |
@@ -269,11 +425,26 @@ unique: loan_number
 | `ltv_percent` | rate | auto | default 75 |
 | `max_eligible_amount` | money | auto | default 0 |
 | `principal_amount` | money | auto | default 0 |
-| `interest_rate_monthly` | rate | auto | default 0 |
+| `interest_rate_monthly` | rate | auto | default 0 · Always stored as a % a month, whatever the shop quotes in. |
+| `quoted_rate` | rate | auto | default 0 · The number staff actually typed. |
+| `quoted_rate_basis` | text | auto | one of: per_month, per_year, per_hundred · default 'per_month' |
 | `interest_method` | text | auto | one of: simple, compound · default 'simple' |
+| `compound_months` | integer | auto | default 12 |
+| `period_basis` | text | auto | one of: calendar, thirty_days, actual_days · default 'calendar' |
+| `minimum_months` | number(6,3) | auto | default 1 |
+| `part_month` | text | auto | one of: full, pro_rata · default 'full' |
+| `grace_days` | integer | auto | default 0 |
+| `penal_rate_monthly` | rate | auto | default 0 |
+| `allocation_order` | text | auto | one of: penalty_interest_principal, interest_penalty_principal, principal_first · default 'penalty_interest_principal' |
+| `overdue_grace_days` | integer | auto | default 15 |
 | `processing_fee` | money | auto | default 0 |
+| `appraisal_fee` | money | auto | default 0 |
+| `fee_treatment` | text | auto | one of: deducted, added, separate · default 'deducted' |
+| `storage_per_month` | money | auto | default 0 |
+| `penalty_accrued` | money | auto | default 0 |
+| `penalty_paid` | money | auto | default 0 |
 | `disbursed_amount` | money | auto | default 0 |
-| `disbursal_mode` | text | no | one of: cash, bank_transfer, upi, cheque |
+| `disbursal_method_id` | → payment_method | no |  |
 | `disbursal_reference` | text | no |  |
 | `disbursed_at` | timestamp | no |  |
 | `interest_accrued` | money | auto | default 0 |
@@ -285,8 +456,13 @@ unique: loan_number
 | `vault_location_id` | → stock_location | no |  |
 | `packet_sealed_at` | timestamp | no |  |
 | `packet_opened_at` | timestamp | no |  |
+| `packet_witness_name` | text | no | Who watched the packet being sealed, where the shop asks for it. |
 | `redeemed_at` | timestamp | no |  |
 | `release_receipt_number` | text | no |  |
+| `released_to_name` | text | no |  |
+| `foreclosure_fee` | money | auto | default 0 |
+| `notice_count` | integer | auto | default 0 |
+| `last_notice_at` | timestamp | no |  |
 | `default_notice_sent_at` | timestamp | no |  |
 | `auction_date` | date | no |  |
 | `auction_proceeds` | money | no |  |
@@ -313,10 +489,14 @@ unique: receipt_number
 | `interest_component` | money | auto | default 0 |
 | `principal_component` | money | auto | default 0 |
 | `penalty_component` | money | auto | default 0 |
-| `mode` | text | auto | one of: cash, card, upi, bank_transfer, cheque · default 'cash' |
+| `fee_component` | money | auto | default 0 |
+| `payment_method_id` | → payment_method | no |  |
 | `reference` | text | no |  |
 | `collected_by` | → app_user | no |  |
 | `voucher_id` | → voucher | no |  |
+| `status` | text | auto | one of: posted, cancelled · default 'posted' |
+| `cancelled_at` | timestamp | no |  |
+| `cancel_reason` | text | no |  |
 | `outstanding_after` | money | auto | default 0 |
 | `notes` | text | no |  |
 
@@ -597,6 +777,8 @@ unique: tag_number
 | `tagging_lot_id` | → tagging_lot | no |  |
 | `label_printed_at` | timestamp | no |  |
 | `label_print_count` | integer | auto | default 0 |
+| `reserved_order_id` | → retail_order | no |  |
+| `reserved_at` | timestamp | no |  |
 
 **Must supply on insert:** `tag_number`, `item_id`, `location_id`
 
@@ -1215,6 +1397,58 @@ Money paid to the customer for old gold: at intake (buyback) or later from the c
 
 ## Custom Orders & Karigar
 
+### `karigar_job`
+
+Metal and work with a karigar: issued, received back, ghat and wages settled.
+
+unique: job_number
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `job_number` | text | **yes** |  |
+| `karigar_id` | → karigar | **yes** |  |
+| `branch_id` | → branch | **yes** |  |
+| `retail_order_id` | → retail_order | no | Null for stock work with no customer order behind it. |
+| `kind` | text | auto | one of: making, repair · default 'making' |
+| `status` | text | auto | one of: issued, received, cancelled · default 'issued' |
+| `metal_source` | text | auto | one of: shop, customer · default 'shop' |
+| `issued_on` | date | **yes** |  |
+| `due_date` | date | no |  |
+| `received_on` | date | no |  |
+| `metal_id` | → metal | **yes** |  |
+| `purity_id` | → purity | no |  |
+| `item_id` | → item | no | The lot the metal left, when it came from stock. |
+| `issued_from_location_id` | → stock_location | no |  |
+| `issued_gross_weight` | weight (g) | auto | default 0 |
+| `issued_net_weight` | weight (g) | auto | default 0 |
+| `issued_fine_weight` | weight (g) | auto | default 0 |
+| `issued_stone_weight` | weight (g) | auto | default 0 |
+| `issued_value` | money | auto | default 0 · Cost of shop metal issued; 0 for the customer’s own. |
+| `ghat_percent` | rate | auto | default 0 |
+| `labour_basis` | text | auto | one of: per_gram, flat, percent · default 'per_gram' |
+| `labour_rate` | rate | auto | default 0 |
+| `received_gross_weight` | weight (g) | auto | default 0 |
+| `received_net_weight` | weight (g) | auto | default 0 |
+| `received_fine_weight` | weight (g) | auto | default 0 |
+| `received_stone_weight` | weight (g) | auto | default 0 |
+| `ghat_allowed_fine` | weight (g) | auto | default 0 |
+| `ghat_actual_fine` | weight (g) | auto | default 0 |
+| `ghat_excess_fine` | weight (g) | auto | default 0 · Lost above the allowance. |
+| `excess_ghat_handling` | text | no | one of: recover, absorb |
+| `excess_ghat_value` | money | auto | default 0 |
+| `labour_amount` | money | auto | default 0 |
+| `received_into_location_id` | → stock_location | no |  |
+| `piece_id` | → stock_piece | no | Set once what came back is tagged into stock. |
+| `issue_voucher_id` | → voucher | no |  |
+| `receive_voucher_id` | → voucher | no |  |
+| `notes` | text | no |  |
+| `cancelled_at` | timestamp | no |  |
+| `cancel_reason` | text | no |  |
+
+**Must supply on insert:** `job_number`, `karigar_id`, `branch_id`, `issued_on`, `metal_id`
+
+---
+
 ### `order_acknowledgement`
 
 
@@ -1273,6 +1507,38 @@ Reference images for custom work, condition photos for repairs.
 
 ---
 
+### `order_custody_item`
+
+Customer goods held by the shop. Tracked, never valued as stock.
+
+unique: retail_order_id + line_number
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `retail_order_id` | → retail_order | **yes** |  |
+| `line_number` | integer | **yes** |  |
+| `token_number` | text | **yes** |  |
+| `description` | text | **yes** |  |
+| `metal_id` | → metal | no |  |
+| `purity_id` | → purity | no |  |
+| `tested_purity_percent` | purity % | no | When it was tested at intake. |
+| `gross_weight` | weight (g) | auto | default 0 |
+| `stone_weight` | weight (g) | auto | default 0 |
+| `net_weight` | weight (g) | auto | default 0 |
+| `declared_value` | money | no |  |
+| `condition_notes` | text | no |  |
+| `where_kept` | text | no | Safe, drawer, counter — wherever the shop keeps it. |
+| `status` | text | auto | one of: received, with_karigar, ready, returned, written_off · default 'received' |
+| `karigar_job_id` | → karigar_job | no |  |
+| `received_on` | date | **yes** |  |
+| `returned_on` | date | no |  |
+| `returned_to_name` | text | no |  |
+| `notes` | text | no |  |
+
+**Must supply on insert:** `retail_order_id`, `line_number`, `token_number`, `description`, `received_on`
+
+---
+
 ### `order_line`
 
 A wedding order mixes ready-stock bookings and made-to-order pieces line by line.
@@ -1310,6 +1576,7 @@ unique: retail_order_id + line_number
 | `line_total` | money | auto | default 0 |
 | `hsn_code` | text | no |  |
 | `special_instructions` | text | no |  |
+| `is_estimate` | boolean | auto | default false |
 
 **Must supply on insert:** `retail_order_id`, `line_number`, `title`
 
@@ -1317,22 +1584,26 @@ unique: retail_order_id + line_number
 
 ### `order_payment`
 
-Advance and token collections against an order, before it is billed.
+Advances taken against an order. Posted when saved: the money in, the customer credited.
 
+unique: receipt_number
 
 | Column | Type | Required | Notes |
 |---|---|---|---|
 | `retail_order_id` | → retail_order | **yes** |  |
-| `mode` | text | **yes** | one of: cash, card, upi, bank_transfer, cheque, emi, old_gold, scheme |
+| `payment_method_id` | → payment_method | **yes** |  |
 | `amount` | money | **yes** |  |
 | `reference` | text | no |  |
+| `doc_date` | date | **yes** |  |
 | `received_at` | timestamp | auto |  |
-| `receipt_number` | text | no |  |
-| `account_id` | → account | no |  |
+| `receipt_number` | text | **yes** |  |
+| `status` | text | auto | one of: posted, cancelled · default 'posted' |
 | `voucher_id` | → voucher | no |  |
+| `cancelled_at` | timestamp | no |  |
+| `cancel_reason` | text | no |  |
 | `notes` | text | no |  |
 
-**Must supply on insert:** `retail_order_id`, `mode`, `amount`
+**Must supply on insert:** `retail_order_id`, `payment_method_id`, `amount`, `doc_date`, `receipt_number`
 
 ---
 
@@ -1393,10 +1664,12 @@ unique: order_number
 | `expected_delivery_date` | date | **yes** |  |
 | `delivered_at` | timestamp | no |  |
 | `is_sla_breached` | boolean | auto | default false |
-| `rate_lock_type` | text | auto | one of: today, floating, fixed_future · default 'today' |
-| `locked_rate_per_gram` | money | no | Frozen at booking for today/fixed_future locks. |
+| `rate_lock_type` | text | auto | one of: booking, delivery, fixed · default 'booking' |
+| `locked_rate_per_gram` | money | no | The gold rate held for this order (booking and fixed locks). |
 | `rate_locked_at` | timestamp | no |  |
-| `rate_lock_expires_at` | timestamp | no |  |
+| `rate_lock_expires_at` | timestamp | no | From orders.rate_lock.days. Null = held until delivered. |
+| `rate_source_used` | text | no | one of: booking, delivery, fixed |
+| `rate_override_by` | → app_user | no | Who switched the rate at delivery, if anyone did. |
 | `metal_amount` | money | auto | default 0 |
 | `making_amount` | money | auto | default 0 |
 | `stone_amount` | money | auto | default 0 |
@@ -1425,6 +1698,10 @@ unique: order_number
 | `repair_issue_types` | json | auto | default '[]' |
 | `under_warranty` | boolean | auto | default false |
 | `original_invoice_number` | text | no | Links a warranty repair back to the sale. |
+| `repair_invoice_type` | text | no | one of: service, goods |
+| `repair_service_charge` | money | auto | default 0 |
+| `estimate_approved_at` | timestamp | no |  |
+| `estimate_approved_by_name` | text | no |  |
 | `event_date` | date | no |  |
 | `event_type` | text | no |  |
 | `company_name` | text | no |  |
@@ -1443,6 +1720,73 @@ unique: order_number
 
 
 ## Platform Operator & SaaS Admin
+
+### `import_batch`
+
+One file brought in from a previous system as one kind of record.
+
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `entity` | text | **yes** | What the rows become: customers, opening_pieces, party_balances… |
+| `title` | text | **yes** |  |
+| `status` | text | auto | one of: draft, validating, validated, importing, imported, partial, undoing, undone · default 'draft' |
+| `source_name` | text | no | The file name as uploaded. |
+| `source_format` | text | no | xlsx, csv, xml, json, dbf… |
+| `source_system` | text | no | The software it came from, as the operator named it. |
+| `sheet_name` | text | no |  |
+| `columns` | json | auto | default '[]' |
+| `mapping` | json | auto | default '{}' |
+| `value_map` | json | auto | default '{}' |
+| `options` | json | auto | default '{}' |
+| `row_count` | integer | auto | default 0 |
+| `valid_count` | integer | auto | default 0 |
+| `invalid_count` | integer | auto | default 0 |
+| `warning_count` | integer | auto | default 0 |
+| `skipped_count` | integer | auto | default 0 |
+| `imported_count` | integer | auto | default 0 |
+| `failed_count` | integer | auto | default 0 |
+| `undone_count` | integer | auto | default 0 |
+| `progress` | integer | auto | default 0 |
+| `validation` | json | no |  |
+| `result` | json | no |  |
+| `error` | text | no | Why the last job stopped, when it stopped on an error. |
+| `validated_at` | timestamp | no |  |
+| `started_at` | timestamp | no |  |
+| `finished_at` | timestamp | no |  |
+| `undone_at` | timestamp | no |  |
+| `operator_id` | uuid | **yes** |  |
+| `operator_name` | text | no |  |
+
+**Must supply on insert:** `entity`, `title`, `operator_id`
+
+---
+
+### `import_row`
+
+One row of an imported file, as it arrived, with what became of it.
+
+unique: batch_id + row_number
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `batch_id` | → import_batch | **yes** |  |
+| `row_number` | integer | **yes** | The row in the file, so messages point at something the shop can find. |
+| `data` | json | **yes** |  |
+| `status` | text | auto | one of: pending, valid, invalid, skipped, imported, failed, undone · default 'pending' |
+| `action` | text | no | one of: insert, update, skip |
+| `messages` | json | auto | default '[]' |
+| `label` | text | no |  |
+| `target_table` | text | no |  |
+| `target_id` | uuid | no |  |
+| `before` | json | no |  |
+| `after` | json | no |  |
+| `skip_requested` | boolean | auto | default false · The operator chose to leave this row out. |
+| `imported_at` | timestamp | no |  |
+
+**Must supply on insert:** `batch_id`, `row_number`, `data`
+
+---
 
 ### `platform_audit_log`
 
@@ -1489,7 +1833,7 @@ unique: order_number
 
 Platform operators. One row today — the super admin, seeded from the CLI, never created through the API.
 
-**platform-level** (not tenant-scoped) · soft delete
+**platform-level** (not tenant-scoped) · soft delete · unique: email
 
 | Column | Type | Required | Notes |
 |---|---|---|---|
@@ -1901,6 +2245,134 @@ unique: doc_number
 **Must supply on insert:** `doc_number`, `doc_date`, `branch_id`, `supplier_id`, `kind`
 
 
+## Executive & Owner BI
+
+### `report_alert`
+
+A figure watched against a limit: sales below target, ghat above tolerance, cash above the insured amount.
+
+soft delete
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `name` | text | **yes** |  |
+| `spec` | json | **yes** |  |
+| `measure_key` | text | **yes** |  |
+| `op` | text | **yes** | one of: gt, gte, lt, lte |
+| `threshold` | money | **yes** |  |
+| `frequency` | text | auto | one of: hourly, daily · default 'daily' |
+| `recipient_ids` | json | auto | default '[]' |
+| `is_active` | boolean | auto | default true |
+| `last_checked_at` | timestamp | no |  |
+| `last_value` | money | no |  |
+| `last_state` | text | no | one of: ok, triggered |
+| `last_triggered_at` | timestamp | no |  |
+| `owner_id` | → app_user | **yes** |  |
+
+**Must supply on insert:** `name`, `spec`, `measure_key`, `op`, `threshold`, `owner_id`
+
+---
+
+### `report_inbox`
+
+What schedules and alerts delivered to a person, with the figures as they were at that moment.
+
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `user_id` | → app_user | **yes** |  |
+| `kind` | text | **yes** | one of: schedule, alert |
+| `title` | text | **yes** |  |
+| `body` | text | no |  |
+| `source_id` | uuid | no |  |
+| `ref` | text | no |  |
+| `spec` | json | no |  |
+| `snapshot` | json | no |  |
+| `read_at` | timestamp | no |  |
+
+**Must supply on insert:** `user_id`, `kind`, `title`
+
+---
+
+### `report_pin`
+
+Reports a person keeps at hand, in their own order. Shown on the Dashboard too.
+
+unique: user_id + ref
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `user_id` | → app_user | **yes** |  |
+| `ref` | text | **yes** |  |
+| `position` | integer | auto | default 0 |
+
+**Must supply on insert:** `user_id`, `ref`
+
+---
+
+### `report_run`
+
+Who ran which report, when, and how long it took. Feeds Recent runs.
+
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `user_id` | → app_user | **yes** |  |
+| `ref` | text | no |  |
+| `name` | text | **yes** |  |
+| `dataset` | text | **yes** |  |
+| `spec` | json | **yes** |  |
+| `row_count` | integer | auto | default 0 |
+| `ms` | integer | auto | default 0 |
+
+**Must supply on insert:** `user_id`, `name`, `dataset`, `spec`
+
+---
+
+### `report_schedule`
+
+A report run on a timetable and delivered to people’s Reports inbox.
+
+soft delete
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `name` | text | **yes** |  |
+| `ref` | text | no |  |
+| `spec` | json | **yes** |  |
+| `frequency` | text | **yes** | one of: daily, weekly, monthly |
+| `day` | integer | no |  |
+| `at_time` | text | auto | default '20:00' |
+| `recipient_ids` | json | auto | default '[]' |
+| `is_active` | boolean | auto | default true |
+| `next_run_at` | timestamp | **yes** |  |
+| `last_run_at` | timestamp | no |  |
+| `owner_id` | → app_user | **yes** |  |
+
+**Must supply on insert:** `name`, `spec`, `frequency`, `next_run_at`, `owner_id`
+
+---
+
+### `report_view`
+
+A report someone designed or customised and saved.
+
+soft delete
+
+| Column | Type | Required | Notes |
+|---|---|---|---|
+| `name` | text | **yes** |  |
+| `description` | text | no |  |
+| `category` | text | **yes** |  |
+| `base_key` | text | no |  |
+| `spec` | json | **yes** |  |
+| `owner_id` | → app_user | **yes** |  |
+| `is_shared` | boolean | auto | default false |
+| `last_run_at` | timestamp | no |  |
+
+**Must supply on insert:** `name`, `category`, `spec`, `owner_id`
+
+
 ## Sales / POS
 
 ### `approval_memo`
@@ -2208,6 +2680,16 @@ unique: account_number
 | `maturity_date` | date | **yes** |  |
 | `due_day` | integer | auto | default 1 |
 | `installment_amount` | money | **yes** |  |
+| `accrual_basis` | text | auto | one of: rupee, weight · default 'rupee' |
+| `purity_id` | → purity | no |  |
+| `bonus_installments` | number(6,3) | auto | default 0 |
+| `bonus_percent` | rate | auto | default 0 |
+| `making_charge_discount_percent` | rate | auto | default 0 |
+| `max_missed_installments` | integer | auto | default 2 |
+| `grace_period_days` | integer | auto | default 7 |
+| `is_flexible_amount` | boolean | auto | default false |
+| `minimum_installment` | money | no |  |
+| `installments_missed` | integer | auto | default 0 |
 | `installments_paid` | integer | auto | default 0 |
 | `installments_due` | integer | auto | default 0 |
 | `total_paid` | money | auto | default 0 |
@@ -2245,11 +2727,15 @@ unique: scheme_account_id + installment_number
 | `paid_on` | date | no |  |
 | `rate_per_gram` | money | no |  |
 | `weight_accrued` | weight (g) | auto | default 0 |
-| `payment_mode` | text | no | one of: cash, card, upi, bank_transfer, cheque, auto_debit |
+| `payment_method_id` | → payment_method | no |  |
 | `payment_reference` | text | no |  |
 | `receipt_number` | text | no |  |
 | `collected_by` | → app_user | no |  |
 | `voucher_id` | → voucher | no |  |
+| `purity_id` | → purity | no |  |
+| `cancelled_at` | timestamp | no |  |
+| `cancel_reason` | text | no |  |
+| `waived_reason` | text | no |  |
 | `last_reminder_at` | timestamp | no |  |
 | `reminder_count` | integer | auto | default 0 |
 | `notes` | text | no |  |
@@ -2270,6 +2756,7 @@ soft delete · unique: code
 | `name` | text | **yes** |  |
 | `description` | text | no |  |
 | `metal_id` | → metal | **yes** |  |
+| `purity_id` | → purity | no |  |
 | `accrual_basis` | text | auto | one of: rupee, weight · default 'rupee' |
 | `tenure_months` | integer | **yes** |  |
 | `installment_amount` | money | no | Null for flexible-amount schemes. |
@@ -2309,6 +2796,11 @@ unique: redemption_number
 | `sales_invoice_id` | → sales_invoice | no |  |
 | `retail_order_id` | → retail_order | no |  |
 | `cash_paid_out` | money | auto | default 0 |
+| `bonus_weight_applied` | weight (g) | auto | default 0 |
+| `making_discount_percent` | rate | auto | default 0 |
+| `deduction_amount` | money | auto | default 0 |
+| `kind` | text | auto | one of: redemption, early_closure · default 'redemption' |
+| `status` | text | auto | one of: posted, cancelled · default 'posted' |
 | `voucher_id` | → voucher | no |  |
 | `notes` | text | no |  |
 
@@ -2503,7 +2995,7 @@ soft delete · unique: code
 
 One row per customer business. Everything else in the database points here.
 
-**platform-level** (not tenant-scoped) · soft delete
+**platform-level** (not tenant-scoped) · soft delete · unique: code
 
 | Column | Type | Required | Notes |
 |---|---|---|---|
@@ -2519,6 +3011,7 @@ One row per customer business. Everything else in the database points here.
 | `pan` | text | no |  |
 | `metadata` | json | auto | default '{}' |
 | `max_branches` | integer | no |  |
+| `is_demo` | boolean | auto | default false |
 | `activated_at` | timestamp | no |  |
 
 **Must supply on insert:** `code`, `legal_name`, `display_name`

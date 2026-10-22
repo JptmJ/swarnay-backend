@@ -50,13 +50,38 @@ export const girviLoanTable = defineTable({
     max_eligible_amount: col.money({ notNull: true, default: '0' }),
     principal_amount: col.money({ notNull: true, default: '0' }),
 
-    /* --- interest --- */
-    interest_rate_monthly: col.rate({ notNull: true, default: '0' }),
+    /*
+     * The terms this borrower was given, frozen on the day they took the loan.
+     * A shop that changes its rate or its rules next month must not quietly
+     * rewrite what someone already signed, and interest already worked out on
+     * the old terms has to stay explainable.
+     */
+    interest_rate_monthly: col.rate({ notNull: true, default: '0', comment: 'Always stored as a % a month, whatever the shop quotes in.' }),
+    quoted_rate: col.rate({ notNull: true, default: '0', comment: 'The number staff actually typed.' }),
+    quoted_rate_basis: col.enum(['per_month', 'per_year', 'per_hundred'], { notNull: true, default: "'per_month'" }),
     interest_method: col.enum(['simple', 'compound'], { notNull: true, default: "'simple'" }),
-    /** Charged up front and deducted from the disbursal, as is common. */
+    compound_months: col.int({ notNull: true, default: '12' }),
+    period_basis: col.enum(['calendar', 'thirty_days', 'actual_days'], { notNull: true, default: "'calendar'" }),
+    minimum_months: col.numeric(6, 3, { notNull: true, default: '1' }),
+    part_month: col.enum(['full', 'pro_rata'], { notNull: true, default: "'full'" }),
+    grace_days: col.int({ notNull: true, default: '0' }),
+    penal_rate_monthly: col.rate({ notNull: true, default: '0' }),
+    allocation_order: col.enum(['penalty_interest_principal', 'interest_penalty_principal', 'principal_first'], {
+      notNull: true, default: "'penalty_interest_principal'",
+    }),
+    overdue_grace_days: col.int({ notNull: true, default: '15' }),
+
+    /** What the shop charged to set the loan up, and how it was taken. */
     processing_fee: col.money({ notNull: true, default: '0' }),
+    appraisal_fee: col.money({ notNull: true, default: '0' }),
+    fee_treatment: col.enum(['deducted', 'added', 'separate'], { notNull: true, default: "'deducted'" }),
+    storage_per_month: col.money({ notNull: true, default: '0' }),
+    penalty_accrued: col.money({ notNull: true, default: '0' }),
+    penalty_paid: col.money({ notNull: true, default: '0' }),
+
     disbursed_amount: col.money({ notNull: true, default: '0' }),
-    disbursal_mode: col.enum(['cash', 'bank_transfer', 'upi', 'cheque'], {}),
+    /** Masters -> Payment Modes, so the shop's own modes and their rules apply. */
+    disbursal_method_id: col.fk('payment_method'),
     disbursal_reference: col.text(),
     disbursed_at: col.timestamptz(),
 
@@ -73,9 +98,16 @@ export const girviLoanTable = defineTable({
     packet_sealed_at: col.timestamptz(),
     packet_opened_at: col.timestamptz(),
 
+    packet_witness_name: col.text({ comment: 'Who watched the packet being sealed, where the shop asks for it.' }),
+
     /* --- close-out --- */
     redeemed_at: col.timestamptz(),
     release_receipt_number: col.text(),
+    released_to_name: col.text(),
+    foreclosure_fee: col.money({ notNull: true, default: '0' }),
+    /** How far along the notice run this loan is. */
+    notice_count: col.int({ notNull: true, default: '0' }),
+    last_notice_at: col.timestamptz(),
     default_notice_sent_at: col.timestamptz(),
     auction_date: col.date(),
     auction_proceeds: col.money(),
@@ -146,11 +178,13 @@ export const girviAccrualTable = defineTable({
     rate_monthly: col.rate({ notNull: true }),
     days: col.int({ notNull: true }),
     interest_amount: col.money({ notNull: true }),
+    /** interest is the normal charge; penal is the extra once a loan is overdue; storage is the locker charge. */
+    kind: col.enum(['interest', 'penal', 'storage'], { notNull: true, default: "'interest'" }),
     is_waived: col.bool({ notNull: true, default: 'false' }),
     waive_reason: col.text(),
     voucher_id: col.fk('voucher'),
   },
-  uniques: [{ columns: ['girvi_loan_id', 'period_start'] }],
+  uniques: [{ columns: ['girvi_loan_id', 'period_start', 'kind'] }],
   indexes: [{ columns: ['period_end'] }],
   checks: [{ name: 'period_ordered', expression: 'period_end >= period_start' }],
 });
@@ -168,10 +202,16 @@ export const girviRepaymentTable = defineTable({
     interest_component: col.money({ notNull: true, default: '0' }),
     principal_component: col.money({ notNull: true, default: '0' }),
     penalty_component: col.money({ notNull: true, default: '0' }),
-    mode: col.enum(['cash', 'card', 'upi', 'bank_transfer', 'cheque'], { notNull: true, default: "'cash'" }),
+    fee_component: col.money({ notNull: true, default: '0' }),
+    /** Masters -> Payment Modes, so reference rules and per-mode limits apply here too. */
+    payment_method_id: col.fk('payment_method'),
     reference: col.text(),
     collected_by: col.fk('app_user'),
     voucher_id: col.fk('voucher'),
+    /** A payment entered by mistake goes back with mirror entries, never by deleting it. */
+    status: col.enum(['posted', 'cancelled'], { notNull: true, default: "'posted'" }),
+    cancelled_at: col.timestamptz(),
+    cancel_reason: col.text(),
     /** Balance after this payment, kept so a receipt can be reprinted exactly. */
     outstanding_after: col.money({ notNull: true, default: '0' }),
     notes: col.text(),
@@ -182,7 +222,7 @@ export const girviRepaymentTable = defineTable({
     { name: 'amount_positive', expression: 'amount > 0' },
     {
       name: 'components_sum_to_amount',
-      expression: 'abs((interest_component + principal_component + penalty_component) - amount) < 0.01',
+      expression: 'abs((interest_component + principal_component + penalty_component + fee_component) - amount) < 0.01',
     },
   ],
 });

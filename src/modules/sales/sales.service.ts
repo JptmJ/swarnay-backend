@@ -19,11 +19,14 @@ import type { RuleSnapshot } from '../masters/pricing/engine.js';
 import { recordMovements, reverseMovementsFor, type MovementInput } from '../inventory/stock.service.js';
 import { postVoucher, reverseVoucher, type MetalEntry, type MoneyEntry } from '../accounts/ledger.service.js';
 import { paymentAccount } from '../purchase/purchase.service.js';
+import { compositionEntries, gstEntries, isComposition, line, modeCharges, postingSettings, revenueEntries } from '../accounts/posting.js';
 import { verifyPassword, normalizePhone } from '../identity/auth.service.js';
 import { effectiveGrants, loadUserAccess } from '../identity/access.service.js';
 import { hasPermission } from '../identity/permissions.js';
 import { businessDate } from '../../core/util/business-date.js';
 import { cancelIntake, createIntake, type IdProof, type OldGoldLineInput } from '../oldgold/oldgold.service.js';
+import { redeem } from '../schemes/schemes.service.js';
+import { markOrderBilled } from '../orders/orders.service.js';
 
 const rs = (v: Decimal) => round(v, 2);
 const g = (v: Decimal) => round(v, 3);
@@ -46,7 +49,7 @@ interface Customer { id: string; code: string; name: string; state_code: string 
 const WALK_IN = 'WALKIN';
 const isWalkIn = (c: Customer) => c.code === WALK_IN;
 
-async function activeCustomer(tx: Tx, id: string): Promise<Customer> {
+export async function activeCustomer(tx: Tx, id: string): Promise<Customer> {
   const c = await tx.maybeOne<Customer & { is_customer: boolean; is_active: boolean }>(
     `select id, code, name, state_code, pan, is_customer, is_active from party where id = $1 and deleted_at is null`, [id]);
   if (!c) throw new NotFoundError('Customer', id);
@@ -76,12 +79,19 @@ async function cashTakenToday(tx: Tx, customerId: string, date: string): Promise
     `select (coalesce((select sum(p.amount) from sales_payment p join sales_invoice s on s.id = p.sales_invoice_id
                         where s.customer_id = $1 and s.doc_date = $2 and s.status = 'posted' and p.mode = 'cash'), 0)
            + coalesce((select sum(r.amount) from customer_receipt r join payment_method m on m.id = r.payment_method_id
-                        where r.customer_id = $1 and r.doc_date = $2 and r.status = 'posted' and m.kind = 'cash'), 0))::text as cash`,
+                        where r.customer_id = $1 and r.doc_date = $2 and r.status = 'posted' and m.kind = 'cash'), 0)
+           + coalesce((select sum(op.amount) from order_payment op join payment_method m on m.id = op.payment_method_id
+                        join retail_order o on o.id = op.retail_order_id
+                        where o.customer_id = $1 and op.doc_date = $2 and op.status = 'posted' and m.kind = 'cash'), 0)
+           + coalesce((select sum(si.amount_paid) from scheme_installment si
+                        join payment_method m on m.id = si.payment_method_id
+                        join scheme_account sa on sa.id = si.scheme_account_id
+                        where sa.customer_id = $1 and si.paid_on = $2 and si.status = 'paid' and m.kind = 'cash'), 0))::text as cash`,
     [customerId, date]);
   return row.cash;
 }
 
-async function checkCashLimit(tx: Tx, customer: Customer, cash: Decimal, date: string) {
+export async function checkCashLimit(tx: Tx, customer: Customer, cash: Decimal, date: string) {
   if (!(compare(cash, '0') > 0)) return;
   if (compare(cash, CASH_LIMIT) >= 0) {
     throw new BusinessRuleError(`Cash of ${inr(cash)} at once is not allowed (₹2 lakh or more, Income-tax Act s.269ST). Take the rest by card, UPI or bank.`, 'cash_limit');
@@ -115,7 +125,11 @@ export interface SaleLineInput {
   hallmarkAmount?: Decimal;
 }
 
-export interface TenderInput { paymentMethodId: string; amount: Decimal; reference?: string }
+export interface TenderInput {
+  paymentMethodId: string; amount: Decimal; reference?: string;
+  /** For a scheme tender: the matured account being spent. It is redeemed as this bill saves. */
+  schemeAccountId?: string;
+}
 
 export interface CheckoutInput {
   /** Left out for a walk-in: paid in full, under ₹2 lakh. */
@@ -134,10 +148,65 @@ export interface CheckoutInput {
   expectedTotal?: Decimal;
   /** Old gold the customer hands over with this bill: taken in and used as payment, in the same transaction. */
   oldGold?: { lines: OldGoldLineInput[]; locationId?: string; idProof?: IdProof };
+  /** Billing a customer's order: its reserved pieces may be sold, and it is delivered when this bill saves. */
+  orderId?: string;
+  /** Labour on the bill — a repair, a polish, a resize. No metal and no stock: a SAC line at the service rate. */
+  services?: ServiceLineInput[];
+}
+
+export interface ServiceLineInput {
+  description: string;
+  amount: Decimal;
+  /** The shop's SAC for the work. Orders settings supply it for a repair. */
+  sacCode?: string;
+  gstPercent?: Decimal;
+}
+
+interface PricedService {
+  description: string; sacCode: string | null; amount: Decimal; gstRate: Decimal;
+  cgst: Decimal; sgst: Decimal; igst: Decimal; total: Decimal;
+}
+
+/**
+ * The item every labour line is billed under. Created once per shop, like the
+ * old-gold lot item, so a service line has somewhere to hang without asking the
+ * shop to set one up first.
+ */
+async function serviceItem(tx: Tx): Promise<string> {
+  const found = await tx.maybeOne<{ id: string }>(`select id from item where code = 'SERVICE' and deleted_at is null`);
+  if (found) return found.id;
+  const made = await repo<{ id: string }>(tx, 'item').insert({
+    code: 'SERVICE', name: 'Labour & Services', nature: 'service', tracking: 'lot', uom: 'piece', is_active: true,
+  });
+  return made.id;
+}
+
+/** Works out the tax on labour lines. Nothing here touches stock. */
+async function priceServices(
+  tx: Tx, branchId: string, customer: Customer, services: ServiceLineInput[] | undefined,
+): Promise<{ rows: PricedService[]; total: Decimal }> {
+  if (!services?.length) return { rows: [], total: '0' };
+  const branch = await tx.one<{ state_code: string | null }>(`select state_code from branch where id = $1`, [branchId]);
+  const interState = Boolean(branch.state_code && customer.state_code && branch.state_code !== customer.state_code);
+  const composition = await isComposition(tx);
+  const rows = services.map((s) => {
+    const amount = rs(s.amount);
+    if (!(compare(amount, '0') > 0)) throw new ValidationError(`Enter what is charged for "${s.description}".`);
+    if (!s.description.trim()) throw new ValidationError('Say what the labour is for.');
+    const gstRate = composition ? '0' : s.gstPercent ?? '0';
+    const tax = rs(div(mul(amount, gstRate), '100'));
+    const half = rs(div(tax, '2'));
+    return {
+      description: s.description.trim(), sacCode: s.sacCode?.trim() || null, amount, gstRate,
+      cgst: interState ? '0' : half, sgst: interState ? '0' : sub(tax, half), igst: interState ? tax : '0',
+      total: add(amount, tax),
+    };
+  });
+  return { rows, total: sum(rows.map((r) => r.total)) };
 }
 
 /** Tenders that spend the customer's credit (advance, credit notes, old gold) rather than bring money in. */
-const CREDIT_KINDS = ['advance', 'old_gold'];
+const CREDIT_KINDS = ['advance', 'old_gold', 'scheme'];
 
 interface SaleLine {
   kind: 'piece' | 'lot';
@@ -155,18 +224,22 @@ const tagTerms = (p: TagTerms): PriceRequest['tag'] => ({
   wastage: p.wastage_percent !== null ? { id: null, basis: 'percent', rate: p.wastage_percent } satisfies RuleSnapshot : null,
 });
 
-async function resolveLines(tx: Tx, branchId: string, customerId: string | null, inputs: SaleLineInput[], lock: boolean): Promise<SaleLine[]> {
+async function resolveLines(tx: Tx, branchId: string, customerId: string | null, inputs: SaleLineInput[], lock: boolean, orderId?: string | null): Promise<SaleLine[]> {
   const pieceIds = inputs.flatMap((l) => (l.pieceId ? [l.pieceId] : []));
   if (new Set(pieceIds).size !== pieceIds.length) throw new BusinessRuleError('The same piece is on the bill twice.', 'piece_repeated');
   const pieces = pieceIds.length ? await tx.query<{ id: string; tag_number: string; status: string; branch_id: string; item_id: string; item_name: string;
     purity_id: string; metal_id: string; location_id: string; gross_weight: Decimal; stone_weight: Decimal; other_weight: Decimal;
-    stone_cost: Decimal; cost_value: Decimal; memo_line_id: string | null; memo_customer: string | null; huid: string | null } & TagTerms>(
+    stone_cost: Decimal; cost_value: Decimal; memo_line_id: string | null; memo_customer: string | null; huid: string | null;
+    reserved_order_id: string | null; reserved_order_number: string | null; reserved_customer: string | null } & TagTerms>(
     `select p.id, p.tag_number, p.status, l.branch_id, p.item_id, i.name as item_name, p.purity_id, pu.metal_id, p.location_id,
             p.gross_weight, p.stone_weight, p.other_weight, p.stone_cost, p.cost_value, ml.id as memo_line_id, m.customer_id as memo_customer,
-            p.making_basis, p.making_rate, p.wastage_percent, p.huid
+            p.making_basis, p.making_rate, p.wastage_percent, p.huid,
+            p.reserved_order_id, ro.order_number as reserved_order_number, rp.name as reserved_customer
        from stock_piece p join item i on i.id = p.item_id join purity pu on pu.id = p.purity_id join stock_location l on l.id = p.location_id
        left join approval_memo_line ml on ml.piece_id = p.id and ml.returned_at is null and ml.sales_invoice_id is null
        left join approval_memo m on m.id = ml.approval_memo_id and m.status = 'open'
+       left join retail_order ro on ro.id = p.reserved_order_id
+       left join party rp on rp.id = ro.customer_id
       where p.id = any($1::uuid[]) ${lock ? 'for update of p' : ''}`, [pieceIds]) : [];
   const pieceById = new Map(pieces.map((p) => [p.id, p]));
 
@@ -190,6 +263,12 @@ async function resolveLines(tx: Tx, branchId: string, customerId: string | null,
         throw new BusinessRuleError(p.status === 'on_memo'
           ? `${n}${p.tag_number} is out on approval${customerId ? ' with another customer' : ' — choose that customer first'}.`
           : `${n}${p.tag_number} is ${p.status.replace('_', ' ')}, not in stock.`, 'piece_not_in_stock');
+      }
+      // Promised on someone's order: it may only leave on that order's own bill.
+      if (p.reserved_order_id && p.reserved_order_id !== orderId) {
+        throw new BusinessRuleError(
+          `${n}${p.tag_number} is booked on ${p.reserved_order_number} for ${p.reserved_customer}. Bill it from that order, or choose another piece.`,
+          'piece_reserved');
       }
       return { kind: 'piece', itemId: p.item_id, itemName: p.item_name, purityId: p.purity_id, metalId: p.metal_id, locationId: p.location_id,
         pieceId: p.id, tracking: 'piece', quantity: 1, gross: p.gross_weight, stone: p.stone_weight, other: p.other_weight,
@@ -246,9 +325,12 @@ const charges = (p: PricedLine) => add(p.makingAmount, p.wastageAmount);
  * then the discount spread over making and wastage. The counter's live quote
  * and checkout both come through here, so the screen and the bill never differ.
  */
-async function priceSale(tx: Tx, branchId: string, customer: Customer | null, inputs: SaleLineInput[], discountIn: Decimal | undefined, lock: boolean) {
-  if (inputs.length === 0) throw new ValidationError('Add at least one piece or item to the bill.');
-  const lines = await resolveLines(tx, branchId, customer?.id ?? null, inputs, lock);
+async function priceSale(
+  tx: Tx, branchId: string, customer: Customer | null, inputs: SaleLineInput[], discountIn: Decimal | undefined, lock: boolean,
+  orderId?: string | null, servicesTotal: Decimal = '0',
+) {
+  if (inputs.length === 0 && isZero(servicesTotal)) throw new ValidationError('Add at least one piece, item or charge to the bill.');
+  const lines = await resolveLines(tx, branchId, customer?.id ?? null, inputs, lock, orderId);
   const requests: PriceRequest[] = lines.map((l) => ({
     metalId: l.metalId, purityId: l.purityId, itemId: l.itemId, quantity: l.quantity, grossWeightG: l.gross, stoneWeightG: l.stone,
     otherWeightG: l.other, stoneAmount: l.stoneAmount, hallmarkAmount: l.hallmark, hallmarked: l.hallmarked, customerStateCode: customer?.state_code ?? null, tag: l.tag,
@@ -267,17 +349,22 @@ async function priceSale(tx: Tx, branchId: string, customer: Customer | null, in
     const shares = allocate(discount, priced.map(charges));
     priced = requests.map((r, i) => price({ ...r, discount: isZero(shares[i]!) ? null : { amount: shares[i]!, on: 'charges' } }));
   }
-  const total = sum(priced.map((p) => p.lineTotal));
+  const total = add(sum(priced.map((p) => p.lineTotal)), servicesTotal);
   const rounding = await getConfig(tx, CONFIG.invoiceRounding);
   const grand = rounding === 'none' ? total : rounding === 'nearest_10' ? mul(round(div(total, '10'), 0), '10') : round(total, 0);
   return { lines, priced, discount, available, free, freePercent, grand, roundOff: sub(grand, total) };
 }
 
 /** The live bill at the counter: the same prices checkout will save, nothing written. */
-export async function quote(tx: Tx, input: { customerId?: string | null; lines: SaleLineInput[]; discount?: Decimal }) {
+export async function quote(tx: Tx, input: {
+  customerId?: string | null; lines: SaleLineInput[]; discount?: Decimal; orderId?: string; services?: ServiceLineInput[];
+}) {
   const branchId = branchOf(tx);
   const customer = input.customerId ? await activeCustomer(tx, input.customerId) : null;
-  const q = await priceSale(tx, branchId, customer, input.lines, input.discount, false);
+  // Labour is taxed the same way here as checkout will tax it, so the counter shows the figure that will be saved.
+  const services = await priceServices(tx, branchId, customer ?? await walkInCustomer(tx), input.services);
+  const labourTax = sum(services.rows.map((r) => sub(r.total, r.amount)));
+  const q = await priceSale(tx, branchId, customer, input.lines, input.discount, false, input.orderId, services.total);
   const total = (k: keyof PricedLine) => sum(q.priced.map((p) => p[k] as Decimal));
   return {
     lines: q.lines.map((l, i) => {
@@ -292,9 +379,11 @@ export async function quote(tx: Tx, input: { customerId?: string | null; lines: 
         taxableAmount: p.taxableAmount, gstAmount: p.gstAmount, lineTotal: p.lineTotal,
       };
     }),
+    services: services.rows,
     totals: {
       metal: total('metalAmount'), wastage: total('wastageAmount'), making: total('makingAmount'), stone: total('stoneAmount'),
-      hallmark: total('hallmarkAmount'), discount: q.discount, taxable: total('taxableAmount'), gst: total('gstAmount'),
+      hallmark: total('hallmarkAmount'), discount: q.discount, labour: sum(services.rows.map((r) => r.amount)),
+      taxable: add(total('taxableAmount'), sum(services.rows.map((r) => r.amount))), gst: add(total('gstAmount'), labourTax),
       roundOff: q.roundOff, grand: q.grand,
       /** Making + wastage: the most the discount can be; above discountFree it needs a manager. */
       discountable: q.available, discountFree: q.free, discountFreePercent: q.freePercent,
@@ -305,10 +394,14 @@ export async function quote(tx: Tx, input: { customerId?: string | null; lines: 
 
 export async function checkout(tx: Tx, input: CheckoutInput) {
   const branchId = branchOf(tx);
-  if (input.lines.length === 0) throw new ValidationError('Add at least one piece or item to the bill.');
+  if (input.lines.length === 0 && !input.services?.length) {
+    throw new ValidationError('Add at least one piece, item or charge to the bill.');
+  }
   const customer = input.customerId ? await activeCustomer(tx, input.customerId) : await walkInCustomer(tx);
   const walkIn = isWalkIn(customer);
-  const { lines, priced, discount, free, freePercent, grand, roundOff } = await priceSale(tx, branchId, customer, input.lines, input.discount, true);
+  const services = await priceServices(tx, branchId, customer, input.services);
+  const { lines, priced, discount, free, freePercent, grand, roundOff } =
+    await priceSale(tx, branchId, customer, input.lines, input.discount, true, input.orderId, services.total);
   if (input.expectedTotal !== undefined && compare(rs(input.expectedTotal), grand) !== 0) {
     throw new BusinessRuleError(`The price is now ${inr(grand)}, not ${inr(input.expectedTotal)} — a rate or Masters changed. Check the bill and save again.`, 'price_changed', { total: grand });
   }
@@ -334,6 +427,8 @@ export async function checkout(tx: Tx, input: CheckoutInput) {
 
   // Tenders: each from Masters → Payment Modes; the rest stays on the customer.
   const tenders = [];
+  const redeemed: { id: string; number: string }[] = [];
+  const schemeTenders: (TenderInput & { amount: Decimal; method: Awaited<ReturnType<typeof paymentAccount>> })[] = [];
   for (const t of input.tenders) {
     const amount = rs(t.amount);
     if (!(compare(amount, '0') > 0)) continue;
@@ -342,9 +437,32 @@ export async function checkout(tx: Tx, input: CheckoutInput) {
     if (method.requires_reference && !t.reference?.trim()) throw new BusinessRuleError(`${method.name} needs a reference (card slip, UTR, cheque number).`, 'reference_required');
     if (method.max_amount && compare(amount, method.max_amount) > 0) throw new BusinessRuleError(`${method.name} allows at most ${inr(method.max_amount)} on one bill.`, 'payment_limit');
     if (method.kind === 'scheme') {
-      throw new BusinessRuleError(`${method.name} is taken through the Schemes screen, not as a counter tender yet.`, 'tender_not_available');
+      if (!t.schemeAccountId) {
+        throw new BusinessRuleError('Choose which scheme account is being spent.', 'scheme_account_required');
+      }
+      schemeTenders.push({ ...t, amount, method });
+      continue;
     }
     tenders.push({ ...t, amount, method });
+  }
+
+  /*
+   * Savings spent on this bill. Most plans have to be taken in one go, so the
+   * whole account is released and only what the bill needs is put against it —
+   * the rest stays as the member's credit, exactly as old gold beyond a bill does.
+   */
+  for (const t of schemeTenders) {
+    const done = await redeem(tx, t.schemeAccountId!, { docDate, toCredit: true });
+    redeemed.push({ id: done.redemption.id, number: done.redemption.redemption_number });
+    const left = sub(grand, sum(tenders.map((x) => x.amount)));
+    const released = rs(done.redemption.amount_redeemed);
+    const applied = compare(released, left) < 0 ? released : left;
+    if (walkIn && compare(released, left) > 0) {
+      throw new BusinessRuleError(`A scheme of ${inr(released)} is more than the ${inr(left)} left to pay. A walk-in cannot keep the difference: choose the customer.`, 'walk_in_not_allowed');
+    }
+    if (compare(applied, '0') > 0) {
+      tenders.push({ ...t, amount: applied, reference: t.reference ?? done.redemption.redemption_number, method: t.method });
+    }
   }
   // Customer's credit spent on this bill (advance, credit notes, old gold taken in earlier).
   const creditUsed = sum(tenders.filter((t) => CREDIT_KINDS.includes(t.method.kind)).map((t) => t.amount));
@@ -397,9 +515,13 @@ export async function checkout(tx: Tx, input: CheckoutInput) {
     doc_number: docNumber, doc_date: docDate, branch_id: branchId, customer_id: customer.id, status: 'posted', channel: 'counter',
     salesperson_id: input.salespersonId ?? tx.context.userId, discount_approved_by: approvedBy, place_of_supply_code: customer.state_code,
     notes: input.notes ?? null,
-    metal_amount: add(totals('metalAmount'), totals('wastageAmount')), making_amount: totals('makingAmount'), stone_amount: totals('stoneAmount'),
-    other_charges: totals('hallmarkAmount'), discount_amount: totals('discountAmount'), taxable_amount: totals('taxableAmount'),
-    cgst_amount: totals('cgstAmount'), sgst_amount: totals('sgstAmount'), igst_amount: totals('igstAmount'), round_off: roundOff,
+    metal_amount: add(totals('metalAmount'), totals('wastageAmount')),
+    making_amount: add(totals('makingAmount'), sum(services.rows.map((s) => s.amount))), stone_amount: totals('stoneAmount'),
+    other_charges: totals('hallmarkAmount'), discount_amount: totals('discountAmount'),
+    taxable_amount: add(totals('taxableAmount'), sum(services.rows.map((s) => s.amount))),
+    cgst_amount: add(totals('cgstAmount'), sum(services.rows.map((s) => s.cgst))),
+    sgst_amount: add(totals('sgstAmount'), sum(services.rows.map((s) => s.sgst))),
+    igst_amount: add(totals('igstAmount'), sum(services.rows.map((s) => s.igst))), round_off: roundOff,
     total_amount: grand, total_gross_weight: sum(lines.map((l) => l.gross)), total_net_weight: totals('netWeightG'),
     total_fine_weight: totals('fineWeightG'), paid_amount: paid, balance_amount: balance, posted_at: new Date(), posted_by: tx.context.userId,
   });
@@ -420,6 +542,20 @@ export async function checkout(tx: Tx, input: CheckoutInput) {
       pricing_snapshot: JSON.stringify({ ...p.snapshot, taxBreakup: p.taxBreakup }),
     };
   }));
+  /* Labour lines sit on the same bill, after the goods, with no weight and no stock behind them. */
+  if (services.rows.length) {
+    const svcItem = await serviceItem(tx);
+    await repo(tx, 'sales_invoice_line').insertMany(services.rows.map((s, i) => ({
+      sales_invoice_id: invoice.id, line_number: lines.length + i + 1, item_id: svcItem, purity_id: null, piece_id: null,
+      location_id: null, description: s.description, hsn_code: s.sacCode, quantity: '1',
+      gross_weight: '0', stone_weight: '0', other_weight: '0', net_weight: '0', fine_weight: '0',
+      rate_per_gram: '0', metal_amount: '0', making_basis: 'flat', making_rate: s.amount, making_amount: s.amount,
+      wastage_percent: '0', wastage_weight: '0', wastage_amount: '0', stone_amount: '0', hallmark_charge: '0',
+      discount_amount: '0', taxable_amount: s.amount, gst_rate: s.gstRate,
+      cgst_amount: s.cgst, sgst_amount: s.sgst, igst_amount: s.igst, line_total: s.total, cost_value: '0',
+      pricing_snapshot: JSON.stringify({ kind: 'service', sacCode: s.sacCode, gstRate: s.gstRate }),
+    })));
+  }
   if (tenders.length) {
     await repo(tx, 'sales_payment').insertMany(tenders.map((t) => ({
       sales_invoice_id: invoice.id, payment_method_id: t.method.id, mode: t.method.kind, amount: t.amount, reference: t.reference ?? null,
@@ -441,15 +577,26 @@ export async function checkout(tx: Tx, input: CheckoutInput) {
   if (memoLines.length) await settleMemoLines(tx, memoLines, invoice.id);
 
   const cost = sum(costs);
-  const gst = add(totals('cgstAmount'), add(totals('sgstAmount'), totals('igstAmount')));
+  const serviceAmount = sum(services.rows.map((s) => s.amount));
+  const ps = await postingSettings(tx);
   const money: MoneyEntry[] = [
     ...tenders.map((t) => CREDIT_KINDS.includes(t.method.kind)
       ? { accountCode: '2400', partyId: customer.id, debit: t.amount, narration: `${t.method.kind === 'old_gold' ? `Old gold ${t.reference ?? ''}` : 'Advance'} used on ${docNumber}` }
       : { ...t.method.account, debit: t.amount, narration: `${t.method.name}${t.reference ? ` ${t.reference}` : ''}` }),
+    ...tenders.flatMap((t) => modeCharges(ps, t.method, t.amount, docNumber!)),
     { accountCode: '1100', partyId: customer.id, debit: balance, narration: `Bill ${docNumber}`, againstType: 'sales_invoice', againstId: invoice.id },
-    { accountCode: '4000', credit: totals('taxableAmount'), narration: 'Sales' },
-    { accountCode: '2200', credit: gst, narration: 'GST payable' },
-    compare(roundOff, '0') >= 0 ? { accountCode: '4900', credit: roundOff, narration: 'Round off' } : { accountCode: '4900', debit: neg(roundOff), narration: 'Round off' },
+    ...revenueEntries(ps, {
+      metal: totals('metalAmount'), wastage: totals('wastageAmount'), making: totals('makingAmount'), stone: totals('stoneAmount'),
+      hallmark: totals('hallmarkAmount'), discount: totals('discountAmount'), taxable: totals('taxableAmount'),
+    }, `Bill ${docNumber}`),
+    ...(compare(serviceAmount, '0') > 0 ? [{ accountCode: '4100', credit: serviceAmount, narration: 'Labour and services' }] : []),
+    ...gstEntries('output', {
+      cgst: add(totals('cgstAmount'), sum(services.rows.map((s) => s.cgst))),
+      sgst: add(totals('sgstAmount'), sum(services.rows.map((s) => s.sgst))),
+      igst: add(totals('igstAmount'), sum(services.rows.map((s) => s.igst))),
+    }, 'credit', `Bill ${docNumber}`),
+    ...compositionEntries(ps, add(totals('taxableAmount'), serviceAmount), `Bill ${docNumber}`),
+    line('4900', roundOff, 'credit', 'Round off'),
     { accountCode: '5100', debit: cost, narration: 'Cost of goods sold' },
     { accountCode: '1200', credit: cost, narration: 'Stock sold' },
   ];
@@ -461,6 +608,11 @@ export async function checkout(tx: Tx, input: CheckoutInput) {
   });
   await tx.query(`update sales_invoice set voucher_id = $2 where id = $1`, [invoice.id, voucherId]);
   if (oldGoldIntake) await tx.query(`update old_gold_intake set applied_to_invoice_id = $2, updated_at = now() where id = $1`, [oldGoldIntake.id, invoice.id]);
+  if (redeemed.length) {
+    await tx.query(`update scheme_redemption set sales_invoice_id = $2, updated_at = now() where id = any($1::uuid[])`,
+      [redeemed.map((r) => r.id), invoice.id]);
+  }
+  if (input.orderId) await markOrderBilled(tx, input.orderId, invoice.id);
   return { ...(await invoiceDetail(tx, invoice.id)), warnings: [...new Set(priced.flatMap((p) => p.warnings))] };
 }
 
@@ -549,6 +701,7 @@ export async function createSalesReturn(tx: Tx, input: SalesReturnInput) {
   }
   const src = await tx.query<{ id: string; line_number: number; item_id: string; purity_id: string; metal_id: string; piece_id: string | null; tracking: 'lot' | 'piece';
     location_id: string; gross_weight: Decimal; net_weight: Decimal; fine_weight: Decimal; returned_net_weight: Decimal; taxable_amount: Decimal;
+    metal_amount: Decimal; making_amount: Decimal; wastage_amount: Decimal; stone_amount: Decimal; hallmark_charge: Decimal; discount_amount: Decimal;
     cgst_amount: Decimal; sgst_amount: Decimal; igst_amount: Decimal; line_total: Decimal; cost_value: Decimal; tag_number: string | null; item_name: string }>(
     `select l.*, i.tracking, i.name as item_name, pu.metal_id, sp.tag_number
        from sales_invoice_line l join item i on i.id = l.item_id join purity pu on pu.id = l.purity_id left join stock_piece sp on sp.id = l.piece_id
@@ -570,6 +723,9 @@ export async function createSalesReturn(tx: Tx, input: SalesReturnInput) {
     const piece = (v: Decimal) => (s.piece_id ? v : rs(mul(v, share)));
     return { s, net, share, gross: s.piece_id ? s.gross_weight : g(mul(s.gross_weight, share)), fine: s.piece_id ? s.fine_weight : g(mul(s.fine_weight, share)),
       taxable: piece(s.taxable_amount), gst: piece(add(s.cgst_amount, add(s.sgst_amount, s.igst_amount))), value: piece(s.line_total), cost: piece(s.cost_value),
+      cgst: piece(s.cgst_amount), sgst: piece(s.sgst_amount), igst: piece(s.igst_amount),
+      metal: piece(s.metal_amount), making: piece(s.making_amount), wastage: piece(s.wastage_amount), stone: piece(s.stone_amount),
+      hallmark: piece(s.hallmark_charge), discount: piece(s.discount_amount),
       locationId: location?.id ?? s.location_id };
   });
 
@@ -634,10 +790,16 @@ export async function createSalesReturn(tx: Tx, input: SalesReturnInput) {
   }
 
   const cost = sum(parts.map((p) => p.cost));
+  const ps = await postingSettings(tx);
+  const total = (k: 'metal' | 'making' | 'wastage' | 'stone' | 'hallmark' | 'discount' | 'taxable' | 'cgst' | 'sgst' | 'igst') => sum(parts.map((p) => p[k]));
   const money: MoneyEntry[] = [
-    { accountCode: '4000', debit: sum(parts.map((p) => p.taxable)), narration: `Return ${docNumber}` },
-    { accountCode: '2200', debit: sum(parts.map((p) => p.gst)), narration: 'GST on returned goods' },
-    { accountCode: '4000', credit: deduction, narration: 'Return deduction' },
+    ...revenueEntries(ps, {
+      metal: total('metal'), making: total('making'), wastage: total('wastage'), stone: total('stone'),
+      hallmark: total('hallmark'), discount: total('discount'), taxable: total('taxable'),
+    }, `Return ${docNumber}`, true),
+    ...gstEntries('output', { cgst: total('cgst'), sgst: total('sgst'), igst: total('igst') }, 'debit', `Return ${docNumber}`),
+    ...compositionEntries(ps, total('taxable'), `Return ${docNumber}`, true),
+    { accountCode: ps.revenueSplit === 'single' ? '4000' : '4400', credit: deduction, narration: 'Return deduction' },
     { accountCode: '1100', partyId: customer.id, credit: adjusted, narration: `Return ${docNumber} against ${inv.doc_number}`, againstType: 'sales_invoice', againstId: inv.id },
     refundMethod
       ? { ...refundMethod.account, credit: back, narration: `Refund by ${refundMethod.name}` }
@@ -701,6 +863,7 @@ export async function createReceipt(tx: Tx, input: { customerId: string; amount:
       ...allocations.map((a) => ({ accountCode: '1100', partyId: customer.id, credit: a.amount, narration: `Against ${a.docNumber}`,
         againstType: 'sales_invoice', againstId: a.invoiceId })),
       { accountCode: '2400', partyId: customer.id, credit: left, narration: 'Advance received' },
+      ...modeCharges(await postingSettings(tx), method, amount, docNumber!),
     ],
   });
   return tx.one(`update customer_receipt set voucher_id = $2 where id = $1 returning *`, [receipt.id, voucherId]);

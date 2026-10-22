@@ -26,6 +26,8 @@ export const schemePlanTable = defineTable({
     name: col.text({ notNull: true }),
     description: col.text(),
     metal_id: col.fk('metal', { notNull: true }),
+    /** The purity the grams are counted in. Null = the purest priced purity of the metal. */
+    purity_id: col.fk('purity'),
 
     /** rupee = accumulate money; weight = accumulate grams at each payment's rate. */
     accrual_basis: col.enum(['rupee', 'weight'], { notNull: true, default: "'rupee'" }),
@@ -76,6 +78,22 @@ export const schemeAccountTable = defineTable({
     /** Which day of the month the installment falls due. */
     due_day: col.int({ notNull: true, default: '1' }),
     installment_amount: col.money({ notNull: true }),
+
+    /*
+     * The plan's terms as they stood the day this customer signed. A shop that
+     * improves its bonus next year must not change what it already promised, and
+     * a shop that reduces it must not take anything away from people already in.
+     */
+    accrual_basis: col.enum(['rupee', 'weight'], { notNull: true, default: "'rupee'" }),
+    purity_id: col.fk('purity'),
+    bonus_installments: col.numeric(6, 3, { notNull: true, default: '0' }),
+    bonus_percent: col.rate({ notNull: true, default: '0' }),
+    making_charge_discount_percent: col.rate({ notNull: true, default: '0' }),
+    max_missed_installments: col.int({ notNull: true, default: '2' }),
+    grace_period_days: col.int({ notNull: true, default: '7' }),
+    is_flexible_amount: col.bool({ notNull: true, default: 'false' }),
+    minimum_installment: col.money(),
+    installments_missed: col.int({ notNull: true, default: '0' }),
 
     /** Running totals, kept in step with the installment rows. */
     installments_paid: col.int({ notNull: true, default: '0' }),
@@ -130,11 +148,18 @@ export const schemeInstallmentTable = defineTable({
     rate_per_gram: col.money(),
     weight_accrued: col.weight({ notNull: true, default: '0' }),
 
-    payment_mode: col.enum(['cash', 'card', 'upi', 'bank_transfer', 'cheque', 'auto_debit'], {}),
+    /** Masters -> Payment Modes, so reference rules, per-mode limits and the cash limit apply here too. */
+    payment_method_id: col.fk('payment_method'),
     payment_reference: col.text(),
     receipt_number: col.text(),
     collected_by: col.fk('app_user'),
     voucher_id: col.fk('voucher'),
+    /** The purity the grams were bought in, and which rate was read. */
+    purity_id: col.fk('purity'),
+    /** A collection entered by mistake goes back to due; the money is reversed with mirror entries. */
+    cancelled_at: col.timestamptz(),
+    cancel_reason: col.text(),
+    waived_reason: col.text(),
     /** Reminder tracking for the "due / missed" log. */
     last_reminder_at: col.timestamptz(),
     reminder_count: col.int({ notNull: true, default: '0' }),
@@ -171,6 +196,12 @@ export const schemeRedemptionTable = defineTable({
     retail_order_id: col.fk('retail_order'),
     /** Only when the plan allows it, which is unusual. */
     cash_paid_out: col.money({ notNull: true, default: '0' }),
+    bonus_weight_applied: col.weight({ notNull: true, default: '0' }),
+    making_discount_percent: col.rate({ notNull: true, default: '0' }),
+    /** Money handed back when an account is closed early, and what was kept. */
+    deduction_amount: col.money({ notNull: true, default: '0' }),
+    kind: col.enum(['redemption', 'early_closure'], { notNull: true, default: "'redemption'" }),
+    status: col.enum(['posted', 'cancelled'], { notNull: true, default: "'posted'" }),
     voucher_id: col.fk('voucher'),
     notes: col.text(),
   },

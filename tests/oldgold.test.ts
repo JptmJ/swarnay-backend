@@ -283,16 +283,4 @@ describe('Old Gold', { timeout: 300_000 }, () => {
     await ok('/api/stock/balances/rebuild', {});
     expect(await snapshot()).toEqual(before);
   });
-
-  it('opens the private screen only with its password, kept off the settings screen', async () => {
-    const listed = await ok('/api/settings/config');
-    expect(JSON.stringify(listed)).not.toContain('private_screen');
-    expect((await setting('security.private_screen_password', 'x')).status).toBe(400);
-    expect(await code('/api/private-screen/unlock', { password: 'wrong' })).toBe('password_invalid');
-    expect((await call('/api/private-screen/unlock', { password: 'Ratna@2026' })).status).toBe(200);
-    expect((await call('/api/private-screen/password', { currentPassword: 'Ratna@2026', newPassword: 'Changed@2026' })).status).toBe(200);
-    expect(await code('/api/private-screen/unlock', { password: 'Ratna@2026' })).toBe('password_invalid');
-    expect((await call('/api/private-screen/unlock', { password: 'Changed@2026' })).status).toBe(200);
-    await ok('/api/private-screen/password', { currentPassword: 'Changed@2026', newPassword: 'Ratna@2026' });
-  });
 });

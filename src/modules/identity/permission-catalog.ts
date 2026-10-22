@@ -9,7 +9,15 @@ import { TENANT_ROLES } from '../platform/roles.js';
 export interface PermissionEntry { module: string; code: string; description: string }
 
 /** Permissions that gate UI or fields rather than a route (e.g. "stock.field.cost_value.view"). */
-const EXTRA: PermissionEntry[] = [];
+const EXTRA: PermissionEntry[] = [
+  ...([
+    ['reports.sales.view', 'Sales reports'], ['reports.stock.view', 'Stock reports'], ['reports.purchase.view', 'Purchase reports'],
+    ['reports.oldgold.view', 'Old gold reports'], ['reports.orders.view', 'Order and karigar reports'], ['reports.schemes.view', 'Gold savings reports'],
+    ['reports.girvi.view', 'Girvi reports'], ['reports.customers.view', 'Customer reports'], ['reports.accounts.view', 'Reports on the books'],
+    ['reports.compliance.view', 'Compliance reports'], ['reports.staff.view', 'Staff reports'],
+    ['reports.cost.view', 'See cost and margin in reports'],
+  ] as const).map(([code, description]) => ({ module: 'reports', code, description })),
+];
 
 export function permissionCatalog(): PermissionEntry[] {
   const byCode = new Map<string, PermissionEntry>();
@@ -57,7 +65,7 @@ const GROUP_NAMES: Record<string, string> = {
   'stock.adjustment': 'Stock Adjustment', 'stock.opening': 'Opening Stock',
   'schemes.accounts': 'Scheme Accounts', 'schemes.collection': 'Installment Collection',
   'settings.config': 'Business Rules', 'settings.theme': 'Theme', 'settings.numbering': 'Numbering',
-  'settings.users': 'Staff', 'settings.roles': 'Roles', 'reports.owner': 'Owner Reports',
+  'settings.users': 'Staff', 'settings.roles': 'Roles', 'dashboard.layout': 'Dashboard layouts',
 };
 
 const titleise = (s: string) =>

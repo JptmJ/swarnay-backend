@@ -9,6 +9,7 @@ import { BusinessRuleError } from '../../core/errors/app-error.js';
 import { add, compare, div, mul, sub, type Decimal } from '../../core/util/decimal.js';
 import { reserveDocumentNumbers } from '../numbering/numbering.service.js';
 import { recordMovements, type MovementInput } from './stock.service.js';
+import { postStockValue } from '../accounts/stock-posting.js';
 import type { ADJUSTMENT_REASONS } from './inventory.schema.js';
 
 export type AdjustmentReason = (typeof ADJUSTMENT_REASONS)[number];
@@ -37,6 +38,11 @@ export async function postAdjustment(tx: Tx, input: {
     ...m, reason: 'adjustment' as const, sourceType: 'stock_adjustment', sourceId: adjustment.id,
     note: `${adjustment.doc_number}: ${input.note}`,
   })));
+  // What was gained or lost reaches the books too, so Stock in Hand stays the stock in the safe.
+  await postStockValue(tx, {
+    voucherType: 'stock_journal', counterCode: '5910', sourceType: 'stock_adjustment', sourceId: adjustment.id,
+    narration: `${adjustment.doc_number}: ${input.reason.replace(/_/g, ' ')}, ${input.note}`, moves: input.movements,
+  });
   return adjustment;
 }
 

@@ -93,6 +93,9 @@ export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   corporate: 'Corporate / Bulk Gifting',
 };
 
-/** Rate lock choices offered at booking (frontend: "Rate Lock & Linked Credits"). */
-export const RATE_LOCK_TYPES = ['today', 'floating', 'fixed_future'] as const;
+/**
+ * How an order is priced: at the rate the day it was taken (held, maybe with an
+ * expiry), at the rate on the day it is billed, or at a rate agreed and typed in.
+ */
+export const RATE_LOCK_TYPES = ['booking', 'delivery', 'fixed'] as const;
 export type RateLockType = (typeof RATE_LOCK_TYPES)[number];

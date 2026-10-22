@@ -16,6 +16,7 @@ import { compare, div, mul } from '../core/util/decimal.js';
 import { newId } from '../core/util/id.js';
 import { rebuildBalances, recordMovements } from '../modules/inventory/stock.service.js';
 import { adjustStock, MANUAL_REASONS } from '../modules/inventory/adjustment.service.js';
+import { postStockValue } from '../modules/accounts/stock-posting.js';
 import { cancelTransfer, dispatchTransfer, receiveTransfer } from '../modules/inventory/transfer.service.js';
 import { cancelCount, countResult, postCount, removeCountLine, scanTags, startCount, weighLot } from '../modules/inventory/count.service.js';
 import { assignHuid, correctPieceWeights, preparePieces, setPiecePricing, tagAll, tagPieces, type TagMakingBasis, type TagPieceInput } from '../modules/tagging/tagging.service.js';
@@ -320,6 +321,12 @@ defineRoute({
         fineWeight: div(mul(String(data.net_weight), purity.fineness), '100'), value: String(data.cost_value ?? '0'),
         sourceType: 'stock_opening', sourceId, note: 'Opening stock',
       })));
+      await postStockValue(tx, {
+        voucherType: 'opening', counterCode: '3900', sourceType: 'stock_opening', sourceId, narration: `Opening stock, ${good.length} lot line(s)`,
+        moves: good.map(({ data, purity }) => ({ direction: 'in' as const, locationId, purityId: purity.id,
+          grossWeight: String(data.gross_weight ?? data.net_weight), fineWeight: div(mul(String(data.net_weight), purity.fineness), '100'),
+          value: String(data.cost_value ?? '0') })),
+      });
       inserted = good.length;
     }
     await recordAudit(tx, `stock.import.${kind}`, 'stock_location', locationId, { received: rows.length, inserted, failed: failed.length, firstRow });

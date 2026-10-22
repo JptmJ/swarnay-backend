@@ -10,7 +10,7 @@ import type { Tx } from '../../core/db/client.js';
 import { asPlatform, withTenant } from '../../core/db/client.js';
 import { newId } from '../../core/util/id.js';
 import { logger } from '../../core/util/logger.js';
-import { DEFAULT_ACCOUNTS } from '../accounts/accounts.schema.js';
+import { ensureChart } from '../accounts/ledger.service.js';
 import { DEFAULT_SERIES } from '../numbering/numbering.service.js';
 import { seedSystemRoles } from '../identity/role-seed.js';
 import { hashPassword } from '../identity/auth.service.js';
@@ -157,20 +157,8 @@ async function createFirstBranch(tx: Tx, input: ProvisionInput): Promise<string>
   return branchId;
 }
 
-async function createAccounts(tx: Tx): Promise<void> {
-  for (const account of DEFAULT_ACCOUNTS) {
-    await tx.query(
-      `insert into account (id, tenant_id, code, name, account_type, is_control, control_for, tracks_metal, is_system)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
-      [
-        newId(), tx.context.tenantId, account.code, account.name, account.account_type,
-        'is_control' in account ? account.is_control : false,
-        'control_for' in account ? account.control_for : null,
-        'tracks_metal' in account ? account.tracks_metal : false,
-      ],
-    );
-  }
-}
+/** The standard chart: Tally-style groups with the ledgers a jewellery shop posts to. */
+const createAccounts = (tx: Tx) => ensureChart(tx, true);
 
 /** One shared counter per document type, so every branch draws unique numbers from it. */
 async function createNumberingSeries(tx: Tx): Promise<void> {

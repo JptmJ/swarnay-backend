@@ -53,10 +53,14 @@ export const retailOrderTable = defineTable({
     is_sla_breached: col.bool({ notNull: true, default: 'false' }),
 
     /* --- rate lock (all types) --- */
-    rate_lock_type: col.enum(RATE_LOCK_TYPES, { notNull: true, default: "'today'" }),
-    locked_rate_per_gram: col.money({ comment: 'Frozen at booking for today/fixed_future locks.' }),
+    /** booking = the rate the day it was taken; delivery = the rate the day it is billed; fixed = agreed and typed in. */
+    rate_lock_type: col.enum(RATE_LOCK_TYPES, { notNull: true, default: "'booking'" }),
+    locked_rate_per_gram: col.money({ comment: 'The gold rate held for this order (booking and fixed locks).' }),
     rate_locked_at: col.timestamptz(),
-    rate_lock_expires_at: col.timestamptz(),
+    rate_lock_expires_at: col.timestamptz({ comment: 'From orders.rate_lock.days. Null = held until delivered.' }),
+    /** What the bill actually used, written when the order is billed. */
+    rate_source_used: col.enum(['booking', 'delivery', 'fixed'], {}),
+    rate_override_by: col.fk('app_user', { comment: 'Who switched the rate at delivery, if anyone did.' }),
 
     /* --- money --- */
     metal_amount: col.money({ notNull: true, default: '0' }),
@@ -97,6 +101,13 @@ export const retailOrderTable = defineTable({
     repair_issue_types: col.jsonb({ notNull: true, default: "'[]'::jsonb" }),
     under_warranty: col.bool({ notNull: true, default: 'false' }),
     original_invoice_number: col.text({ comment: 'Links a warranty repair back to the sale.' }),
+    /** Overrides orders.repair.invoice_type for this one repair. */
+    repair_invoice_type: col.enum(['service', 'goods'], {}),
+    /** Labour quoted for the repair, before GST. */
+    repair_service_charge: col.money({ notNull: true, default: '0' }),
+    /** Agreed with the customer before work starts; a repair waits here until then. */
+    estimate_approved_at: col.timestamptz(),
+    estimate_approved_by_name: col.text(),
 
     /* --- wedding / corporate --- */
     event_date: col.date(),
@@ -183,6 +194,8 @@ export const orderLineTable = defineTable({
 
     hsn_code: col.text(),
     special_instructions: col.text(),
+    /** Work that cannot be priced yet: line_total is what the customer was quoted, GST comes with the bill. */
+    is_estimate: col.bool({ notNull: true, default: 'false' }),
   },
   uniques: [{ columns: ['retail_order_id', 'line_number'] }],
   indexes: [{ columns: ['piece_id'], where: 'piece_id is not null' }],
@@ -263,23 +276,142 @@ export const orderAcknowledgementTable = defineTable({
 export const orderPaymentTable = defineTable({
   name: 'order_payment',
   module: 'orders',
-  comment: 'Advance and token collections against an order, before it is billed.',
+  comment: 'Advances taken against an order. Posted when saved: the money in, the customer credited.',
   columns: {
     retail_order_id: col.fk('retail_order', { notNull: true, onDelete: 'cascade' }),
-    mode: col.enum(
-      ['cash', 'card', 'upi', 'bank_transfer', 'cheque', 'emi', 'old_gold', 'scheme'],
-      { notNull: true },
-    ),
+    /** From Masters → Payment Modes, so reference and limit rules apply as at the counter. */
+    payment_method_id: col.fk('payment_method', { notNull: true }),
     amount: col.money({ notNull: true }),
     reference: col.text(),
+    doc_date: col.date({ notNull: true }),
     received_at: col.timestamptz({ notNull: true, default: 'now()' }),
-    receipt_number: col.text(),
-    account_id: col.fk('account'),
+    receipt_number: col.text({ notNull: true }),
+    status: col.enum(['posted', 'cancelled'], { notNull: true, default: "'posted'" }),
     voucher_id: col.fk('voucher'),
+    cancelled_at: col.timestamptz(),
+    cancel_reason: col.text(),
     notes: col.text(),
   },
-  indexes: [{ columns: ['retail_order_id'] }],
+  uniques: [{ columns: ['receipt_number'] }],
+  indexes: [{ columns: ['retail_order_id'] }, { columns: ['doc_date'] }],
   checks: [{ name: 'amount_positive', expression: 'amount > 0' }],
+});
+
+/**
+ * Jewellery a karigar is holding: shop metal issued to be made into something,
+ * or the customer's own piece sent out for repair.
+ *
+ * Issuing moves fine metal from stock (1210) to the karigar (1220) — or, for the
+ * customer's own metal, only onto this card, because the shop never owned it.
+ * Receiving brings it back, works out the ghat against what was agreed, and
+ * books the labour.
+ */
+export const karigarJobTable = defineTable({
+  name: 'karigar_job',
+  module: 'orders',
+  comment: 'Metal and work with a karigar: issued, received back, ghat and wages settled.',
+  columns: {
+    job_number: col.text({ notNull: true }),
+    karigar_id: col.fk('karigar', { notNull: true }),
+    branch_id: col.fk('branch', { notNull: true }),
+    retail_order_id: col.fk('retail_order', { comment: 'Null for stock work with no customer order behind it.' }),
+    kind: col.enum(['making', 'repair'], { notNull: true, default: "'making'" }),
+    status: col.enum(['issued', 'received', 'cancelled'], { notNull: true, default: "'issued'" }),
+    /** shop = metal out of our stock; customer = the customer's own item, which we never owned. */
+    metal_source: col.enum(['shop', 'customer'], { notNull: true, default: "'shop'" }),
+
+    issued_on: col.date({ notNull: true }),
+    due_date: col.date(),
+    received_on: col.date(),
+
+    metal_id: col.fk('metal', { notNull: true }),
+    purity_id: col.fk('purity'),
+    item_id: col.fk('item', { comment: 'The lot the metal left, when it came from stock.' }),
+    issued_from_location_id: col.fk('stock_location'),
+    issued_gross_weight: col.weight({ notNull: true, default: '0' }),
+    issued_net_weight: col.weight({ notNull: true, default: '0' }),
+    issued_fine_weight: col.weight({ notNull: true, default: '0' }),
+    issued_stone_weight: col.weight({ notNull: true, default: '0' }),
+    issued_value: col.money({ notNull: true, default: '0', comment: 'Cost of shop metal issued; 0 for the customer’s own.' }),
+
+    /** What was agreed before the work started. */
+    ghat_percent: col.rate({ notNull: true, default: '0' }),
+    labour_basis: col.enum(['per_gram', 'flat', 'percent'], { notNull: true, default: "'per_gram'" }),
+    labour_rate: col.rate({ notNull: true, default: '0' }),
+
+    received_gross_weight: col.weight({ notNull: true, default: '0' }),
+    received_net_weight: col.weight({ notNull: true, default: '0' }),
+    received_fine_weight: col.weight({ notNull: true, default: '0' }),
+    received_stone_weight: col.weight({ notNull: true, default: '0' }),
+    ghat_allowed_fine: col.weight({ notNull: true, default: '0' }),
+    ghat_actual_fine: col.weight({ notNull: true, default: '0' }),
+    ghat_excess_fine: col.weight({ notNull: true, default: '0', comment: 'Lost above the allowance.' }),
+    excess_ghat_handling: col.enum(['recover', 'absorb'], {}),
+    excess_ghat_value: col.money({ notNull: true, default: '0' }),
+    labour_amount: col.money({ notNull: true, default: '0' }),
+
+    received_into_location_id: col.fk('stock_location'),
+    piece_id: col.fk('stock_piece', { comment: 'Set once what came back is tagged into stock.' }),
+    issue_voucher_id: col.fk('voucher'),
+    receive_voucher_id: col.fk('voucher'),
+    notes: col.text(),
+    cancelled_at: col.timestamptz(),
+    cancel_reason: col.text(),
+  },
+  uniques: [{ columns: ['job_number'] }],
+  indexes: [
+    { columns: ['karigar_id', 'status'] },
+    { columns: ['retail_order_id'], where: 'retail_order_id is not null' },
+    { columns: ['status', 'due_date'] },
+  ],
+  checks: [
+    { name: 'issued_weight_positive', expression: 'issued_gross_weight >= 0 and issued_fine_weight >= 0' },
+    { name: 'customer_metal_has_no_value', expression: "metal_source <> 'customer' or issued_value = 0" },
+    { name: 'shop_metal_leaves_a_location', expression: "metal_source <> 'shop' or status = 'cancelled' or issued_from_location_id is not null" },
+  ],
+});
+
+/**
+ * The customer's own jewellery while it is in the shop's hands — a repair, or
+ * metal they brought for a new piece. It is never stock, because the shop does
+ * not own it, but it must be findable: who brought it, what it weighed, where
+ * it is now, and when it went back.
+ */
+export const orderCustodyItemTable = defineTable({
+  name: 'order_custody_item',
+  module: 'orders',
+  comment: 'Customer goods held by the shop. Tracked, never valued as stock.',
+  columns: {
+    retail_order_id: col.fk('retail_order', { notNull: true, onDelete: 'cascade' }),
+    line_number: col.int({ notNull: true }),
+    /** Written on the paper tag tied to the item, so it can be found in the drawer. */
+    token_number: col.text({ notNull: true }),
+    description: col.text({ notNull: true }),
+    metal_id: col.fk('metal'),
+    purity_id: col.fk('purity'),
+    tested_purity_percent: col.purity({ comment: 'When it was tested at intake.' }),
+    gross_weight: col.weight({ notNull: true, default: '0' }),
+    stone_weight: col.weight({ notNull: true, default: '0' }),
+    net_weight: col.weight({ notNull: true, default: '0' }),
+    /** What the customer says it is worth, for a dispute or an insurance claim. */
+    declared_value: col.money(),
+    condition_notes: col.text(),
+    where_kept: col.text({ comment: 'Safe, drawer, counter — wherever the shop keeps it.' }),
+    status: col.enum(['received', 'with_karigar', 'ready', 'returned', 'written_off'], {
+      notNull: true, default: "'received'",
+    }),
+    karigar_job_id: col.fk('karigar_job'),
+    received_on: col.date({ notNull: true }),
+    returned_on: col.date(),
+    returned_to_name: col.text(),
+    notes: col.text(),
+  },
+  uniques: [{ columns: ['retail_order_id', 'line_number'] }],
+  indexes: [{ columns: ['status'] }, { columns: ['token_number'] }],
+  checks: [
+    { name: 'custody_net_within_gross', expression: 'net_weight <= gross_weight' },
+    { name: 'returned_has_date', expression: "status <> 'returned' or returned_on is not null" },
+  ],
 });
 
 /** Messages sent to the customer about the order — the frontend shows these on the detail page. */

@@ -14,6 +14,7 @@ import { add, type Decimal } from '../../core/util/decimal.js';
 import { reserveDocumentNumbers } from '../numbering/numbering.service.js';
 import { recordMovements, type MovementInput } from './stock.service.js';
 import { lotMovements, type LotLine } from './adjustment.service.js';
+import { postStockValue } from '../accounts/stock-posting.js';
 
 interface Location { id: string; branch_id: string; name: string; kind: string; is_active: boolean }
 
@@ -82,6 +83,14 @@ export async function dispatchTransfer(tx: Tx, input: {
     quantity: l.quantity, gross_weight: l.gross, net_weight: l.net, fine_weight: l.fine, value: l.value,
   })));
   await recordMovements(tx, moves(lines, from.id, landing, transfer.id, transfer.doc_number));
+  // Between branches the goods leave this branch's books into transit until the other branch receives them.
+  if (!sameBranch) {
+    await postStockValue(tx, {
+      voucherType: 'branch_transfer', counterCode: '1600', sourceType: 'stock_transfer', sourceId: transfer.id,
+      narration: `${transfer.doc_number} sent to ${to.name}`,
+      moves: lines.map((l) => ({ direction: 'out' as const, locationId: from.id, purityId: l.purityId, grossWeight: l.gross, fineWeight: l.fine, value: l.value })),
+    });
+  }
   if (pieceIds.length) {
     await tx.query(`update stock_piece set location_id = $2, status = $3, updated_at = now(), updated_by = $4 where id = any($1::uuid[])`,
       [pieceIds, landing, sameBranch ? 'in_stock' : 'in_transit', tx.context.userId]);
@@ -110,6 +119,11 @@ async function land(tx: Tx, id: string, status: 'received' | 'cancelled') {
   const target = status === 'received' ? transfer.to_location_id : transfer.from_location_id;
   // A reversal or a delivery must always go through — the goods physically exist.
   await recordMovements(tx, moves(lines, transit, target, transfer.id, transfer.doc_number), { allowNegative: true });
+  await postStockValue(tx, {
+    voucherType: 'branch_transfer', counterCode: '1600', sourceType: 'stock_transfer', sourceId: transfer.id,
+    narration: `${transfer.doc_number} ${status === 'received' ? 'received' : 'cancelled, back in stock'}`,
+    moves: lines.map((l) => ({ direction: 'in' as const, locationId: target, purityId: l.purityId, grossWeight: l.gross, fineWeight: l.fine, value: l.value })),
+  });
   const pieceIds = lines.flatMap((l) => (l.pieceId ? [l.pieceId] : []));
   if (pieceIds.length) {
     await tx.query(`update stock_piece set location_id = $2, status = 'in_stock', updated_at = now(), updated_by = $3 where id = any($1::uuid[])`,

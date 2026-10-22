@@ -516,6 +516,7 @@ export async function tenantDetail(tenantId: string) {
       tx.query(`select u.id, u.email, u.full_name, u.phone, u.is_active, u.last_login_at, u.created_at,
                        u.default_branch_id,
                        coalesce((select r.code from user_role ur join role r on r.id = ur.role_id where ur.user_id = u.id limit 1), 'sales') as role_code,
+                       (select r.name from user_role ur join role r on r.id = ur.role_id where ur.user_id = u.id limit 1) as role_label,
                        b.name as branch_name, b.code as branch_code
                   from app_user u
                   left join branch b on b.id = u.default_branch_id
@@ -528,9 +529,10 @@ export async function tenantDetail(tenantId: string) {
 
   const catalog = new Map(MODULE_CATALOG.map((m) => [m.key, m]));
   const roleNames = new Map<string, string>(TENANT_ROLES.map((r) => [r.code as string, r.name as string]));
-  const users: Array<Record<string, unknown>> = (inner.users as Array<Record<string, unknown>>).map((u) => ({
+  // Staff roles are named per business, so their name comes from the row; owner and admin keep the template's.
+  const users: Array<Record<string, unknown>> = (inner.users as Array<Record<string, unknown>>).map(({ role_label, ...u }) => ({
     ...u,
-    role_name: roleNames.get(String(u.role_code)) ?? u.role_code,
+    role_name: roleNames.get(String(u.role_code)) ?? role_label ?? u.role_code,
   }));
 
   return {

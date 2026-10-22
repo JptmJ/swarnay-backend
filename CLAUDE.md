@@ -1,7 +1,6 @@
 # Swarnay Backend — Working Rules
 
-Loaded automatically by Claude Code. The same content is in
-`docs/SWARNAY-PROMPT.md` for attaching to other tools.
+Loaded automatically by Claude Code.
 
 These rules keep the API, `/dev-docs` and the generated frontend client from
 drifting apart. Nothing here is optional.
@@ -94,9 +93,8 @@ npm run typecheck && npm test && npm run db:migrate -- --dry-run
 The dry run must end with **"The database already matches"** — if it shows
 pending changes, run `npm run db:migrate` and check the result.
 
-Run all three against a development database (`DB_TARGET=local` or `supabase`),
-never `DB_TARGET=deployed`. `npm test` needs a `.env.test` pointing at a
-database used only by the tests, and refuses to start without one.
+`npm test` needs a `.env.test` pointing at a database used only by the tests —
+never `swarnay_erp` — and refuses to start without one.
 
 ---
 
@@ -106,19 +104,19 @@ database used only by the tests, and refuses to start without one.
 add one import line to `src/bootstrap.ts`, restart. The schema engine does the
 rest.
 
-**One schema: `swarnay_schema`.** Every table lives there, on every database
-(laptop, Supabase, deployed). The name is fixed in `core/db/search-path.ts` —
-never make it configurable, never add another schema to the search_path, and
-never schema-qualify a table to reach another copy. Two developers once ran
+**One database, one schema: `swarnay_erp` / `swarnay_schema`.** Every table
+lives there, for the laptop and the server alike. The name is fixed in
+`core/db/search-path.ts` — never make it configurable, never add another schema
+to the search_path, and never schema-qualify a table to reach another copy. Two developers once ran
 with different schemas (`public`, `app`) against the same database: every
 table existed twice, rows were split between the copies, and some foreign keys
-pointed across them. `npm run db:migrate -- --force` removes any other copy —
-see `docs/ENVIRONMENTS.md`.
+pointed across them. `npm run db:migrate -- --force` removes any other copy.
 
-**`npm run db:migrate` is the only way to change a database's structure.** It
-makes the database match the code; `--force` also applies what deletes data.
-Never fix structure by hand in the SQL editor — the next migrate would see
-drift or undo it.
+**The code is the only way to change the database's structure.** There is no
+sync setting: every start of the server — laptop or production — applies
+everything that adds (tables, columns, indexes, keys); anything that deletes
+data is listed and waits for `npm run db:migrate -- --force`. Never fix
+structure by hand in the SQL editor — the next start would see drift or undo it.
 
 - **Defaults are raw SQL.** `default: "'draft'"` — a string literal needs its
   own quotes. `default: 'draft'` is read as a column reference. There is a
@@ -168,20 +166,20 @@ jewellery shop that is a real rupee somebody has to explain.
 
 ## Environments
 
-- **A laptop picks its database with `DB_TARGET`** (`local` · `supabase` ·
-  `deployed`) and one `DATABASE_URL_<TARGET>` per database in `.env`. Servers
-  set `DATABASE_URL` directly. Details: `docs/ENVIRONMENTS.md`.
-- **`DB_TARGET=deployed` is the live shops' data.** Sync is verify-only there,
-  and anything that changes tables or rewrites data in bulk calls
-  `assertMayChange()` (`core/db/protected.ts`), so it needs
-  `--confirm=<database>` on the command line. A new CLI that writes in bulk
-  calls it first; one that seeds demo data refuses the deployed target outright.
-- **The frontends switch backend with `npm run dev` / `npm run dev:deployed`**,
-  driven by their committed `.env.<mode>` files. Never edit a committed env
-  file to switch.
-- **Credentials never go in a committed file.** `.env.example` holds
-  placeholders only. The production database password was once committed there;
-  it sits in public git history and had to be rotated.
+- **One database, one URL.** The backend reads `DATABASE_URL` (the
+  `swarnay_erp` database) from `.env` — the same variables on a laptop and on
+  the server. Never add a setting that selects a database, a schema or a sync
+  mode: settings like that are what split the data last time, and
+  `config/env.ts` refuses the retired ones (`DB_TARGET`, `SCHEMA_SYNC_MODE`,
+  `DATABASE_SCHEMA`, …) by name.
+- **Every repo has the same two env files:** `.env` (this machine's real
+  values, never in git) and `.env.example` (the template). No `.env.deployed`,
+  `.env.production` or mode-specific files. The ERP's `npm run build` refuses a
+  localhost `VITE_API_URL`, so a laptop's `.env` cannot be shipped by mistake.
+- **Credentials never go in a committed file.** `.env.example` holds `<…>`
+  placeholders only; production refuses to start with one left in. The
+  production database password was once committed to `.env.example` and a
+  super-admin password to the README; both sit in public git history.
 
 ---
 
@@ -189,9 +187,9 @@ jewellery shop that is a real rupee somebody has to explain.
 
 - **The app must never connect as a role that bypasses Row Level Security** —
   a superuser, or any role with `rolbypassrls = true`, silently voids every
-  isolation policy. Supabase's `postgres` role is one; there the app connects
-  as `ratnagrid_app` (`rolbypassrls = false`). The startup log warns when the
-  connected role bypasses RLS.
+  isolation policy. On `swarnay_erp` the app connects as `swarnay_user`, which
+  must stay `NOSUPERUSER` with `rolbypassrls = false`. The startup log warns
+  when the connected role bypasses RLS.
 - **Never write a query that filters by `tenant_id` by hand.** RLS does it.
   Adding it manually suggests you are working around the context, which is a
   sign something is wrong.
@@ -220,10 +218,9 @@ waiting. *"Not enough stock. Available: 80g — tried to remove 200g."* — not
 ## Quick reference
 
 ```bash
-npm run dev          # sync schema, then serve on :4000
+npm run dev          # bring the tables up to date, then serve on :4000
 npm run db:migrate   # make the database match the code (-- --dry-run to look, -- --force to also delete)
-DB_TARGET=deployed npm run dev   # local backend on the live data (protected)
-npm run db:seed      # demo tenants (--fresh wipes first)
+npm run seed:superadmin -- --password='…'   # create or reset the super admin
 npm run gen:client   # regenerate the frontend client
 npm test             # unit tests
 npm run typecheck    # types only

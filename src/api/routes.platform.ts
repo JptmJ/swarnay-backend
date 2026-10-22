@@ -27,6 +27,7 @@ import {
 import {
   endSupportSession, listSupportSessions, MAX_DURATION_MINUTES, startSupportSession,
 } from '../modules/platform/support-session.service.js';
+import { deleteDemoTenant, demoJob, MAX_DEMOS_PER_JOB, startDemoJob, stopDemoJob } from '../modules/platform/demo.service.js';
 import { MODULE_CATALOG, moduleSpec, subModulesOf } from '../modules/tenancy/module-catalog.js';
 import { invalidateTenantModules } from '../modules/tenancy/module-access.service.js';
 import { errorEnvelope, gstin, idParam, listOf, pagination, pan, phone, record, uuid } from './schemas.js';
@@ -38,6 +39,8 @@ const ROLES_DAY = '2026-10-03';
 const TYPES_DAY = '2026-10-04';
 /** The day switching a module off became enforced by the API. */
 const MODULES_DAY = '2026-10-08';
+/** The day demo businesses could be made from the console. */
+const DEMO_DAY = '2026-10-10';
 const M = 'platform';
 const seed = [{ date: TODAY, kind: 'added' as const, note: 'Super admin RBAC: tenants, branches, users.' }];
 
@@ -160,20 +163,25 @@ defineRoute({
     status: z.enum(['trial', 'active', 'suspended', 'closed']).optional(),
     kind: z.enum(['manufacturer', 'retailer', 'both']).optional(),
     search: z.string().optional().describe('Matches code or name.'),
+    demo: z.enum(['true', 'false']).optional().describe('true = only demo businesses, false = only real ones. Omit for both.'),
   }).merge(pagination),
   responses: [{ status: 200, description: 'Tenants with user and branch counts.', schema: listOf(record) }],
-  changelog: seed,
+  changelog: [
+    ...seed,
+    { date: DEMO_DAY, kind: 'added', note: '`is_demo` on every row, and a `demo` filter.' },
+  ],
   handler: async (req) => asPlatform(async (tx) => {
     const q = queryOf<Record<string, string | number | undefined>>(req);
     const clauses = ['t.deleted_at is null']; const params: unknown[] = [];
     if (q.status) { params.push(q.status); clauses.push(`t.status = $${params.length}`); }
     if (q.kind) { params.push(q.kind); clauses.push(`t.kind = $${params.length}`); }
+    if (q.demo) clauses.push(q.demo === 'true' ? 't.is_demo' : 'not t.is_demo');
     if (q.search) { params.push(`%${q.search}%`); clauses.push(`(t.code ilike $${params.length} or t.display_name ilike $${params.length})`); }
     const where = `where ${clauses.join(' and ')}`;
 
     const rows = await tx.query(
       `select t.id, t.code, t.display_name, t.legal_name, t.kind, t.status, t.gstin,
-              t.created_at, t.activated_at,
+              t.created_at, t.activated_at, t.is_demo, t.max_branches,
               (select count(*) from branch b where b.tenant_id = t.id and b.deleted_at is null) as branch_count,
               (select count(*) from app_user u where u.tenant_id = t.id and u.deleted_at is null) as user_count,
               (select count(*) from tenant_module m where m.tenant_id = t.id and m.enabled) as module_count,
@@ -278,7 +286,115 @@ defineRoute({
   handler: async (req) => updateTenant(param(req, 'id'), req.body, platformUserId(req), req.ip),
 });
 
-/* --------------------------------------------------------- branches */
+/* ------------------------------------------------------------ demos */
+
+const demoLogin = z.object({
+  fullName: z.string(), email: z.string(), role: z.enum(['owner', 'admin', 'staff']),
+  roleName: z.string(), branch: z.string(),
+});
+const demoJobSchema = z.object({
+  id: uuid, count: z.number().int(),
+  status: z.enum(['queued', 'running', 'done']),
+  startedAt: z.string(), finishedAt: z.string().nullable(),
+  current: z.object({ index: z.number().int(), step: z.string() }).nullable()
+    .describe('Which demo is being made (1-based) and what it is doing now. Null once finished.'),
+  accounts: z.array(z.object({
+    tenantId: uuid, code: z.string(), displayName: z.string(), legalName: z.string(), kind: z.string(), city: z.string(),
+    password: z.string().describe('Everyone in this demo signs in with it. Shown only by this job; never stored readable.'),
+    branches: z.array(z.object({ code: z.string(), name: z.string() })),
+    roles: z.array(z.object({ name: z.string(), permissions: z.array(z.string()) }))
+      .describe('The staff roles made for this demo, with the permissions the dice gave each.'),
+    logins: z.array(demoLogin),
+    data: z.record(z.string(), z.number()).describe('How many customers, pieces, invoices, orders… were made.'),
+    warnings: z.array(z.string()).describe('Sample data that could not be made. The demo works without it.'),
+    seconds: z.number(),
+  })),
+  failures: z.array(z.object({ index: z.number().int(), message: z.string() }))
+    .describe('Demos that could not be made at all. Nothing of them is left behind.'),
+  stopped: z.boolean().describe('Asked to stop: the demo being made was finished and the rest were not started.'),
+});
+
+defineRoute({
+  method: 'post', path: '/api/platform/demo-tenants', module: M,
+  summary: 'Make demo businesses full of sample data',
+  description:
+    'Give a count; each demo is a complete business made through the same services as a real one: one to three branches, '
+    + 'an owner, a branch admin per branch, two to four staff roles named and given random permissions, one or two staff per branch, '
+    + 'and sample data in every module — rates, items, formulas, customers, suppliers, karigars, purchases, tagged stock, bills, '
+    + 'receipts, an approval memo, orders, old gold, scheme members with their collections, girvi loans and expenses.\n\n'
+    + 'Codes are `demo-xxxxx` and every login in a demo shares one password, shown only by the job. No password change is asked for at first sign-in.\n\n'
+    + 'A demo takes tens of seconds, so this answers 202 at once with a job; poll `GET /api/platform/demo-tenants/jobs/:id`. '
+    + 'Demos are made one at a time across the platform. A demo whose business, people or masters cannot be made is removed again and listed under `failures`.',
+  permission: 'platform.tenants.create',
+  body: z.object({
+    count: z.number().int().min(1).max(MAX_DEMOS_PER_JOB).describe(`How many demo businesses to make, at most ${MAX_DEMOS_PER_JOB}.`),
+  }),
+  responses: [
+    { status: 202, description: 'Started. Poll the job.', schema: demoJobSchema },
+    { status: 400, description: 'A count below 1 or above the limit.', schema: errorEnvelope },
+  ],
+  changelog: [{ date: DEMO_DAY, kind: 'added', note: 'Demo businesses with sample data, made in the background.' }],
+  handler: async (req, res) => {
+    const job = startDemoJob(req.body.count, platformUserId(req)!, req.ip);
+    const { operatorId: _operator, ...out } = job;
+    res.status(202).json(out);
+  },
+});
+
+defineRoute({
+  method: 'get', path: '/api/platform/demo-tenants/jobs/:id', module: M,
+  summary: 'Progress of a demo job, and the logins it made',
+  description:
+    'Only the operator who started the job can read it, because it carries the passwords. Finished jobs are kept for an hour and then forgotten — copy the logins before that.\n\n'
+    + 'Jobs live in the memory of the server that started them: a restart forgets them, and a demo being made at that moment is left half-made (delete it from its tenant page).',
+  permission: 'platform.tenants.create', params: idParam,
+  responses: [
+    { status: 200, description: 'The job.', schema: demoJobSchema },
+    { status: 404, description: 'No such job, someone else’s, or more than an hour old.', schema: errorEnvelope },
+  ],
+  changelog: [{ date: DEMO_DAY, kind: 'added', note: 'Polled by the console while demos are made.' }],
+  handler: async (req) => {
+    const { operatorId: _operator, ...out } = demoJob(param(req, 'id'), platformUserId(req)!);
+    return out;
+  },
+});
+
+defineRoute({
+  method: 'post', path: '/api/platform/demo-tenants/jobs/:id/stop', module: M,
+  summary: 'Stop a demo job after the demo it is making',
+  description:
+    'For a count typed by mistake. The demo being made is finished — cutting it off would leave half a business to delete — and no further demo is started. '
+    + 'Demos already made stay; delete them from their tenant pages if they are not wanted. Stopping a finished job changes nothing.',
+  permission: 'platform.tenants.create', params: idParam,
+  responses: [
+    { status: 200, description: 'The job, with `stopped: true`.', schema: demoJobSchema },
+    { status: 404, description: 'No such job, someone else’s, or more than an hour old.', schema: errorEnvelope },
+  ],
+  changelog: [{ date: DEMO_DAY, kind: 'added', note: 'A job can be stopped after the demo in hand.' }],
+  handler: async (req) => {
+    const { operatorId: _operator, ...out } = stopDemoJob(param(req, 'id'), platformUserId(req)!);
+    return out;
+  },
+});
+
+defineRoute({
+  method: 'delete', path: '/api/platform/tenants/:id', module: M,
+  summary: 'Delete a demo business and everything in it',
+  description:
+    'Only for demos (`is_demo`). A real business is never deleted — suspend or close it instead, which keeps its records. '
+    + 'Everything the demo held goes: users, branches, stock, bills, ledgers. The console’s own audit log keeps its entries about it.',
+  permission: 'platform.tenants.update', params: idParam,
+  responses: [
+    { status: 204, description: 'Deleted.' },
+    { status: 404, description: 'No such tenant.', schema: errorEnvelope },
+    { status: 422, description: '`tenant_not_demo` — a real business cannot be deleted.', schema: errorEnvelope },
+  ],
+  changelog: [{ date: DEMO_DAY, kind: 'added', note: 'Removes a demo business when it is no longer needed.' }],
+  handler: async (req, res) => {
+    await deleteDemoTenant(param(req, 'id'), platformUserId(req)!, req.ip);
+    res.status(204).end();
+  },
+});
 
 /* ------------------------------------------------------ staff roles */
 

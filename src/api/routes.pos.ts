@@ -12,7 +12,7 @@ import {
 } from '../modules/sales/sales.service.js';
 import { decodeCursor, encodeCursor } from './crud.js';
 import { idProof, oldGoldLine } from './routes.oldgold.js';
-import { errorEnvelope, idParam, isoDate, money, record, uuid, weight } from './schemas.js';
+import { decimal, errorEnvelope, idParam, isoDate, money, record, uuid, weight } from './schemas.js';
 
 const DAY = '2026-09-30';
 const added = (note: string) => [{ date: DAY, kind: 'added' as const, note }];
@@ -85,13 +85,23 @@ defineRoute({
   ].join(' '),
   permission: 'pos.create',
   body: z.object({
-    customerId: uuid.optional().describe('Leave out for a walk-in: paid in full and under ₹2 lakh.'), lines: z.array(saleLine).min(1).max(100),
-    tenders: z.array(z.object({ paymentMethodId: uuid, amount: money, reference: z.string().trim().max(80).optional() })).max(10),
+    customerId: uuid.optional().describe('Leave out for a walk-in: paid in full and under ₹2 lakh.'), lines: z.array(saleLine).max(100).default([]),
+    tenders: z.array(z.object({
+      paymentMethodId: uuid, amount: money, reference: z.string().trim().max(80).optional(),
+      schemeAccountId: uuid.optional().describe('For a scheme tender: the matured account being spent, redeemed as this bill saves.'),
+    })).max(10),
     discount: money.optional(), approver: z.object({ identifier: z.string().min(1), password: z.string().min(1) }).optional(),
     pan: z.string().trim().max(10).optional(), salespersonId: uuid.optional(), notes: z.string().max(500).optional(),
     expectedTotal: money.optional().describe('The total the counter showed; refused with price_changed if the price moved since.'),
     oldGold: z.object({ lines: z.array(oldGoldLine).min(1).max(50), locationId: uuid.optional(), idProof: idProof.optional() }).optional()
       .describe('Old gold handed over with this bill: taken in and used as payment up to what is left; any more stays as advance (not for a walk-in).'),
+    orderId: uuid.optional()
+      .describe('Billing a customer’s order: the pieces it holds may be sold, and saving this bill delivers the order.'),
+    services: z.array(z.object({
+      description: z.string().trim().min(1).max(200), amount: money,
+      sacCode: z.string().trim().max(10).optional(), gstPercent: decimal.optional(),
+    })).max(20).optional()
+      .describe('Labour on the bill — a repair, a polish, a resize. No metal and no stock: a SAC line at the service rate.'),
   }),
   responses: [
     { status: 201, description: 'The posted bill with its lines and payments, and any pricing warnings.', schema: record },
@@ -106,7 +116,13 @@ defineRoute({
   method: 'post', path: `${S}/quote`, module: 'pos', summary: 'Price the bill on the counter',
   description: 'The same pricing checkout will save — tag terms, formulas, discount on making and wastage, GST, round off — with each line’s metal, wastage and making, and where they came from. Nothing is saved.',
   permission: 'pos.create',
-  body: z.object({ customerId: uuid.nullish(), lines: z.array(saleLine).min(1).max(100), discount: money.optional() }),
+  body: z.object({
+    customerId: uuid.nullish(), lines: z.array(saleLine).max(100).default([]), discount: money.optional(), orderId: uuid.optional(),
+    services: z.array(z.object({
+      description: z.string().trim().min(1).max(200), amount: money,
+      sacCode: z.string().trim().max(10).optional(), gstPercent: decimal.optional(),
+    })).max(20).optional(),
+  }),
   responses: [
     { status: 200, description: 'Lines, totals, the most discount allowed and the limit before approval, and pricing warnings.', schema: record },
     { status: 422, description: 'Piece not in stock, or discount above making and wastage.', schema: errorEnvelope },

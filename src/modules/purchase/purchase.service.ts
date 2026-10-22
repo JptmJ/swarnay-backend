@@ -12,6 +12,7 @@ import { add, compare, div, fixed, isZero, mul, round, sub, sum, type Decimal } 
 import { reserveDocumentNumbers } from '../numbering/numbering.service.js';
 import { recordMovements, reverseMovementsFor, type MovementInput } from '../inventory/stock.service.js';
 import { postVoucher, reverseVoucher, type MetalEntry, type MoneyEntry } from '../accounts/ledger.service.js';
+import { inputGstEntries, postingSettings } from '../accounts/posting.js';
 import { businessDate } from '../../core/util/business-date.js';
 
 const g = (v: Decimal) => round(v, 3);
@@ -390,10 +391,11 @@ export async function createBill(tx: Tx, input: BillInput & { supplierId: string
   const { numbers: [docNumber] } = await reserveDocumentNumbers(tx, 'purchase_invoice', 1, { branchId, date: new Date(docDate) });
   const number = typed || docNumber!;
 
+  const split = await gstSplit(tx, branchId, supplier, gst);
   const bill = await repo<{ id: string; doc_number: string }>(tx, 'purchase_invoice').insert({
     doc_number: docNumber, doc_date: docDate, branch_id: branchId, supplier_id: supplier.id, status: 'posted',
     supplier_invoice_number: number, supplier_invoice_date: input.supplierInvoiceDate, due_date: input.dueDate ?? null,
-    taxable_amount: taxable, ...(await gstSplit(tx, branchId, supplier, gst)), total_amount: add(taxable, gst),
+    taxable_amount: taxable, ...split, total_amount: add(taxable, gst),
     posted_at: new Date(), posted_by: tx.context.userId,
   });
   await tx.query(`update goods_receipt set purchase_invoice_id = $2, updated_at = now() where id = any($1::uuid[])`, [input.inwardIds, bill.id]);
@@ -402,7 +404,7 @@ export async function createBill(tx: Tx, input: BillInput & { supplierId: string
       voucherType: 'purchase', voucherDate: input.supplierInvoiceDate, branchId, sourceType: 'purchase_invoice', sourceId: bill.id,
       narration: `GST on ${supplier.name} bill ${number}`,
       money: [
-        { accountCode: '1300', debit: gst, narration: 'GST input credit' },
+        ...inputGstEntries(await postingSettings(tx), { cgst: split.cgst_amount, sgst: split.sgst_amount, igst: split.igst_amount }, 'debit', `Bill ${number}`),
         { accountCode: '2000', partyId: supplier.id, credit: gst, narration: `GST, bill ${number}`, againstType: 'purchase_invoice', againstId: bill.id },
       ],
     });
@@ -539,10 +541,11 @@ export async function createReturn(tx: Tx, input: {
 
   const { numbers: [docNumber] } = await reserveDocumentNumbers(tx, 'purchase_return', 1, { branchId, date: new Date(docDate) });
   const fineOwed = fineByMetal(terms.map((t) => ({ metalId: t.srcLine.metal_id, fine: t.fineOwed })));
+  const retSplit = await gstSplit(tx, branchId, supplier, gst);
   const ret = await repo<{ id: string; doc_number: string }>(tx, 'purchase_return').insert({
     doc_number: docNumber, doc_date: docDate, branch_id: branchId, supplier_id: supplier.id, status: 'posted',
     goods_receipt_id: inward.id, reason: input.reason ?? 'other', notes: input.notes ?? null,
-    taxable_amount: sum(terms.map((t) => t.stockValue)), ...(await gstSplit(tx, branchId, supplier, gst)),
+    taxable_amount: sum(terms.map((t) => t.stockValue)), ...retSplit,
     total_amount: add(sum(terms.map((t) => add(t.rupees, t.metalValue))), gst),
     total_gross_weight: sum(terms.map((t) => t.gross)), total_net_weight: sum(terms.map((t) => t.net)), total_fine_weight: sum(terms.map((t) => t.fine)),
     fine_owed: JSON.stringify(fineOwed), posted_at: new Date(), posted_by: tx.context.userId,
@@ -582,7 +585,7 @@ export async function createReturn(tx: Tx, input: {
     { accountCode: '2000', partyId: supplier.id, debit: add(rupees, gst), narration: `Return ${ret.doc_number}`, againstType: 'purchase_return', againstId: ret.id },
     { accountCode: '2010', partyId: supplier.id, debit: metalValue, narration: `Metal returned, ${ret.doc_number}` },
     { accountCode: '1200', credit: stockValue, narration: 'Stock returned to supplier' },
-    { accountCode: '1300', credit: gst, narration: 'GST input reversed' },
+    ...inputGstEntries(await postingSettings(tx), { cgst: retSplit.cgst_amount, sgst: retSplit.sgst_amount, igst: retSplit.igst_amount }, 'credit', `Return ${ret.doc_number}`),
     compare(gap, '0') >= 0 ? { accountCode: '4200', credit: gap, narration: 'Return valuation difference' }
       : { accountCode: '4200', debit: neg(gap), narration: 'Return valuation difference' },
   ];
@@ -625,8 +628,8 @@ export interface SettlementInput {
 /** The money account a payment method lands in: its own, else Cash in Hand for cash and Bank for the rest. */
 export async function paymentAccount(tx: Tx, methodId: string, branchId: string) {
   const m = await tx.maybeOne<{ id: string; name: string; kind: string; account_id: string | null; requires_reference: boolean;
-    max_amount: Decimal | null; is_active: boolean; offered: boolean }>(
-    `select m.id, m.name, m.kind, m.account_id, m.requires_reference, m.max_amount, m.is_active,
+    max_amount: Decimal | null; is_active: boolean; offered: boolean; charges_percent: Decimal | null }>(
+    `select m.id, m.name, m.kind, m.account_id, m.requires_reference, m.max_amount, m.is_active, m.charges_percent,
             (not exists (select 1 from payment_method_branch b where b.payment_method_id = m.id)
              or exists (select 1 from payment_method_branch b where b.payment_method_id = m.id and b.branch_id = $2)) as offered
        from payment_method m where m.id = $1 and m.deleted_at is null`, [methodId, branchId]);

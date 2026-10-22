@@ -88,7 +88,7 @@ export const TENANT_ROLES: RoleTemplate[] = [
     isBranchAdmin: true,
     permissions: [
       'orders.*', 'stock.*', 'tagging.*', 'pos.*', 'oldgold.*',
-      'schemes.*', 'girvi.*', 'master.*', 'reports.*', 'accounts.*',
+      'schemes.*', 'girvi.*', 'master.*', 'reports.*', 'accounts.*', 'dashboard.*',
       'settings.config.view', 'settings.config.update',
       'settings.theme.view', 'settings.theme.update',
       'settings.numbering.view', 'settings.numbering.update',

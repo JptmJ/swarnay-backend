@@ -141,7 +141,7 @@ export const MODULE_CATALOG: ModuleSpec[] = [
       sub('schemes.accounts', 'Enrollment', 'retailer', 'live'),
       sub('schemes.collection', 'Installment Collection', 'retailer', 'live'),
       sub('schemes.maturity', 'Maturity & Redemption', 'retailer', 'live'),
-      sub('schemes.liability', 'Liability Dashboard', 'retailer'),
+      sub('schemes.liability', 'Liability Dashboard', 'retailer', 'live'),
     ],
   },
   {
@@ -304,9 +304,9 @@ export interface ModuleGate { module: string; subModule: string | null }
 /**
  * Which module an endpoint belongs to, worked out once when routes are built.
  *
- * The route's own `module` wins when it is a catalog key — the dashboard reads
- * with `reports.owner.view`, but switching off Owner BI must not take the
- * dashboard with it. Otherwise the permission prefix decides, which is how
+ * The route's own `module` wins when it is a catalog key, so an endpoint is
+ * switched off with the module it belongs to, not the one its permission
+ * happens to start with. Otherwise the permission prefix decides, which is how
  * `/api/purchase/*` (module "purchase", permission `pos.purchase.*`) lands
  * under POS. A sub-module is matched only when the permission names one, e.g.
  * `pos.purchase.post` → `pos.purchase`; `orders.create` names none, so the
